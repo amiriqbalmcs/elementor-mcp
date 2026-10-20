@@ -382,6 +382,12 @@ trait EMCP_Tools_Admin_Settings_Trait {
 		if ( $applied < 64 ) {
 			$add[] = 'emcp-tools/delete-term';
 		}
+		// v65: quarantine-file and restore-quarantined-file (3.21.0) ship off;
+		// list-quarantine is read-only and stays on.
+		if ( $applied < 65 ) {
+			$add[] = 'emcp-tools/quarantine-file';
+			$add[] = 'emcp-tools/restore-quarantined-file';
+		}
 		return array(
 			'add'   => array_values( array_unique( $add ) ),
 			'strip' => array_values( array_unique( $strip ) ),

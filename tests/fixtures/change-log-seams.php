@@ -80,6 +80,20 @@ switch ( $argv[1] ) {
 		check( 'content' === EMCP_Tools_Change_Log::kind_of( 'funnelkit-automations' ), 'funnelkit-automations kind' );
 		break;
 
+	case 'file-quarantine-dispatch':
+		// A stand-in for the quarantine engine: the ledger must hand it the ref and force.
+		class EMCP_Tools_File_Quarantine {
+			public static $calls = array();
+			public static function rollback( array $rb, bool $force = false ) {
+				self::$calls[] = array( $rb['quarantine_id'], $force );
+				return true;
+			}
+		}
+		$rb = array( 'type' => 'file-quarantine', 'quarantine_id' => '20261018-000000-a1b2c3d4' );
+		check( true === $apply->invoke( null, $rb, true ), 'file-quarantine not dispatched' );
+		check( array( array( '20261018-000000-a1b2c3d4', true ) ) === EMCP_Tools_File_Quarantine::$calls, 'calls: ' . json_encode( EMCP_Tools_File_Quarantine::$calls ) );
+		break;
+
 	default:
 		check( false, 'unknown scenario' );
 }

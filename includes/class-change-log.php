@@ -964,6 +964,18 @@ class EMCP_Tools_Change_Log {
 					return true;
 				}
 				return new WP_Error( 'rollback_failed', __( 'Could not reverse the redirect change.', 'emcp-tools' ) );
+			case 'file-quarantine':
+				// Moves the quarantined item back; force restores over whatever sits there now.
+				// History can run outside the MCP surface, so load the classes on demand.
+				if ( ! class_exists( 'EMCP_Tools_File_Quarantine' ) && defined( 'EMCP_TOOLS_DIR' ) && is_file( EMCP_TOOLS_DIR . 'includes/class-file-quarantine.php' ) ) {
+					require_once EMCP_TOOLS_DIR . 'includes/class-filesystem-guard.php';
+					require_once EMCP_TOOLS_DIR . 'includes/class-file-mover.php';
+					require_once EMCP_TOOLS_DIR . 'includes/class-file-quarantine.php';
+				}
+				if ( class_exists( 'EMCP_Tools_File_Quarantine' ) ) {
+					return EMCP_Tools_File_Quarantine::rollback( $rb, $force );
+				}
+				return new WP_Error( 'rollback_failed', __( 'The file quarantine is unavailable.', 'emcp-tools' ) );
 			default:
 				/**
 				 * Apply a rollback type this class does not know.

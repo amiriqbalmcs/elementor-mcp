@@ -34,6 +34,7 @@ final class ChangeLogSeamsTest extends TestCase {
 			'unknown types are offered to the filters'     => array( 'unknown-type-filters' ),
 			'an unhandled unknown type is still an error'  => array( 'unknown-type-unhandled' ),
 			'FunnelKit domains are content'                => array( 'funnelkit-kinds' ),
+			'quarantine undo reaches the quarantine engine' => array( 'file-quarantine-dispatch' ),
 		);
 	}
 }

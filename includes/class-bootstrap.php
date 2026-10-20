@@ -521,6 +521,8 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/performance/class-performance-analyzer.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-performance-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-filesystem-guard.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-file-mover.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-file-quarantine.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-filesystem-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/sql/class-sql-lexer.php';
 		require_once EMCP_TOOLS_DIR . 'includes/sql/class-sql-policy.php';

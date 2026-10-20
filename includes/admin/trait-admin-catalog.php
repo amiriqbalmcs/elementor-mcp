@@ -338,6 +338,9 @@ trait EMCP_Tools_Admin_Catalog_Trait {
 					'emcp-tools/write-file'     => array( 'label' => __( 'Write File', 'emcp-tools' ),     'description' => __( 'Create/overwrite a file (backs up first). Disabled by default.', 'emcp-tools' ), 'badges' => array() ),
 					'emcp-tools/edit-file'      => array( 'label' => __( 'Edit File', 'emcp-tools' ),      'description' => __( 'Replace a string in a file (backs up first). Disabled by default.', 'emcp-tools' ),  'badges' => array() ),
 					'emcp-tools/delete-file'    => array( 'label' => __( 'Delete File', 'emcp-tools' ),    'description' => __( 'Delete a file (backs up; needs confirm). Disabled by default.', 'emcp-tools' ),     'badges' => array() ),
+					'emcp-tools/list-quarantine'           => array( 'label' => __( 'List Quarantine', 'emcp-tools' ),           'description' => __( 'List files and folders held in quarantine, with their manifests.', 'emcp-tools' ), 'badges' => array( 'read-only' ) ),
+					'emcp-tools/quarantine-file'           => array( 'label' => __( 'Quarantine File', 'emcp-tools' ),           'description' => __( 'Move a suspicious file or folder out of the web root (manifest kept, undoable; needs confirm). Disabled by default.', 'emcp-tools' ), 'badges' => array() ),
+					'emcp-tools/restore-quarantined-file'  => array( 'label' => __( 'Restore Quarantined File', 'emcp-tools' ),  'description' => __( 'Move a quarantined item back to its original path (needs confirm). Disabled by default.', 'emcp-tools' ), 'badges' => array() ),
 				),
 			),
 			'database'         => array(

@@ -1,9 +1,10 @@
 <?php
 /**
- * Filesystem MCP tools: read/list/search (enabled) + write/edit/delete
- * (disabled-by-default). Every path is confined to ABSPATH by
- * EMCP_Tools_Filesystem_Guard. Writes require edit_files + respect
- * DISALLOW_FILE_EDIT; delete requires confirm:true.
+ * Filesystem MCP tools: read/list/search and list-quarantine (enabled) +
+ * write/edit/delete and quarantine/restore (disabled-by-default). Every path is
+ * confined to ABSPATH by EMCP_Tools_Filesystem_Guard. Writes require edit_files
+ * + respect DISALLOW_FILE_EDIT; delete, quarantine and restore require
+ * confirm:true.
  *
  * @package EMCP_Tools
  * @since   3.0.0
@@ -32,6 +33,9 @@ class EMCP_Tools_Filesystem_Abilities {
 		$this->register_write_file();
 		$this->register_edit_file();
 		$this->register_delete_file();
+		$this->register_list_quarantine();
+		$this->register_quarantine_file();
+		$this->register_restore_quarantined_file();
 	}
 
 	/** All filesystem tools require manage_options (reads can expose secrets). */
@@ -499,6 +503,179 @@ class EMCP_Tools_Filesystem_Abilities {
 			'deleted' => true,
 			'backup'  => $backup ? EMCP_Tools_Filesystem_Guard::to_relative( $backup ) : null,
 		);
+	}
+
+	// ---- list-quarantine -----------------------------------------------
+
+	private function register_list_quarantine(): void {
+		$this->ability_names[] = 'emcp-tools/list-quarantine';
+		emcp_tools_register_ability(
+			'emcp-tools/list-quarantine',
+			array(
+				'label'               => __( 'List Quarantine', 'emcp-tools' ),
+				'description'         => __( 'List files and folders moved into quarantine by quarantine-file: id, original path, size, sha256, times, reason, who and when, where it is stored and whether it was restored. Read-only.', 'emcp-tools' ),
+				'category'            => 'emcp-tools',
+				'execute_callback'    => array( $this, 'execute_list_quarantine' ),
+				'permission_callback' => array( $this, 'check_permission' ),
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'status' => array( 'type' => 'string', 'enum' => array( 'quarantined', 'restored' ), 'description' => __( 'Only entries in this state. Default: all.', 'emcp-tools' ) ),
+					),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'meta'                => array( 'annotations' => array( 'readonly' => true, 'destructive' => false ), 'show_in_rest' => true ),
+			)
+		);
+	}
+
+	/**
+	 * @param array $input
+	 * @return array
+	 */
+	public function execute_list_quarantine( $input ) {
+		$status  = (string) ( $input['status'] ?? '' );
+		$status  = in_array( $status, array( 'quarantined', 'restored' ), true ) ? $status : '';
+		$entries = EMCP_Tools_File_Quarantine::entries( $status );
+		return array( 'entries' => $entries, 'count' => count( $entries ) );
+	}
+
+	// ---- quarantine-file -----------------------------------------------
+
+	private function register_quarantine_file(): void {
+		$this->ability_names[] = 'emcp-tools/quarantine-file';
+		emcp_tools_register_ability(
+			'emcp-tools/quarantine-file',
+			array(
+				'label'               => __( 'Quarantine File', 'emcp-tools' ),
+				'description'         => __( 'Move a suspicious file or folder out of the web root so it stops running, with a manifest (size, sha256, times, reason). Every stored file is renamed to end in .quarantined, so no web server runs it, and the folder is denied to the web (.htaccess and web.config). Stored above WordPress when that folder is writable and not itself web-served, else in wp-content/emcp-quarantine. Undo with restore-quarantined-file or rollback-change. Refuses WordPress core files, wp-admin, wp-includes and symlinks that leave the site. Requires confirm:true. Disabled by default.', 'emcp-tools' ),
+				'category'            => 'emcp-tools',
+				'execute_callback'    => array( $this, 'execute_quarantine_file' ),
+				'permission_callback' => array( $this, 'check_permission' ),
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'path'    => array( 'type' => 'string', 'description' => __( 'File or folder relative to the WordPress root, e.g. wp-content/plugins/x/prompts/prompts/index.php.', 'emcp-tools' ) ),
+						'reason'  => array( 'type' => 'string', 'description' => __( 'Why it is being quarantined (kept in the manifest).', 'emcp-tools' ) ),
+						'confirm' => array( 'type' => 'boolean', 'description' => __( 'Must be true to quarantine.', 'emcp-tools' ) ),
+					),
+					'required'   => array( 'path' ),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'meta'                => array( 'annotations' => array( 'readonly' => false, 'destructive' => true ), 'show_in_rest' => true ),
+			)
+		);
+	}
+
+	/**
+	 * @param array $input
+	 * @return array|\WP_Error
+	 */
+	public function execute_quarantine_file( $input ) {
+		if ( empty( $input['confirm'] ) || true !== $input['confirm'] ) {
+			return new \WP_Error( 'confirm_required', __( 'Quarantining a file requires confirm:true.', 'emcp-tools' ) );
+		}
+		$gate = EMCP_Tools_Filesystem_Guard::writes_allowed();
+		if ( is_wp_error( $gate ) ) {
+			return $gate;
+		}
+		$result = EMCP_Tools_File_Quarantine::quarantine( (string) ( $input['path'] ?? '' ), (string) ( $input['reason'] ?? '' ) );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		$manifest = $result['manifest'];
+		$change   = '';
+		if ( class_exists( 'EMCP_Tools_Change_Log' ) ) {
+			$change = EMCP_Tools_Change_Log::record(
+				array(
+					'domain'   => 'filesystem',
+					'action'   => 'quarantine-file',
+					'target'   => $manifest['original_path'],
+					'summary'  => 'Quarantined ' . $manifest['original_path'],
+					'rollback' => array(
+						'type'          => EMCP_Tools_File_Quarantine::ROLLBACK_TYPE,
+						'quarantine_id' => $manifest['id'],
+					),
+				)
+			);
+			if ( '' !== $change ) {
+				EMCP_Tools_File_Quarantine::set_change_id( $result['base'], $manifest, $change );
+			}
+		}
+		return array(
+			'id'        => $manifest['id'],
+			'path'      => $manifest['original_path'],
+			'type'      => $manifest['type'],
+			'size'      => $manifest['size'],
+			'sha256'    => $manifest['sha256'],
+			'location'  => $manifest['location'],
+			'stored_at' => $result['stored_at'],
+			'method'    => $manifest['method'],
+			'change_id' => $change,
+			'warnings'  => $result['warnings'],
+		);
+	}
+
+	// ---- restore-quarantined-file --------------------------------------
+
+	private function register_restore_quarantined_file(): void {
+		$this->ability_names[] = 'emcp-tools/restore-quarantined-file';
+		emcp_tools_register_ability(
+			'emcp-tools/restore-quarantined-file',
+			array(
+				'label'               => __( 'Restore Quarantined File', 'emcp-tools' ),
+				'description'         => __( 'Move a quarantined file or folder back to its original path, by id from list-quarantine. Refuses when something now exists at that path unless overwrite:true, which quarantines the current item first instead of deleting it. Requires confirm:true. Disabled by default.', 'emcp-tools' ),
+				'category'            => 'emcp-tools',
+				'execute_callback'    => array( $this, 'execute_restore_quarantined_file' ),
+				'permission_callback' => array( $this, 'check_permission' ),
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'id'        => array( 'type' => 'string', 'description' => __( 'Quarantine id from list-quarantine.', 'emcp-tools' ) ),
+						'overwrite' => array( 'type' => 'boolean', 'description' => __( 'Restore even if the original path exists now (the current item is quarantined, not deleted).', 'emcp-tools' ) ),
+						'confirm'   => array( 'type' => 'boolean', 'description' => __( 'Must be true to restore.', 'emcp-tools' ) ),
+					),
+					'required'   => array( 'id' ),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'meta'                => array( 'annotations' => array( 'readonly' => false, 'destructive' => true ), 'show_in_rest' => true ),
+			)
+		);
+	}
+
+	/**
+	 * @param array $input
+	 * @return array|\WP_Error
+	 */
+	public function execute_restore_quarantined_file( $input ) {
+		if ( empty( $input['confirm'] ) || true !== $input['confirm'] ) {
+			return new \WP_Error( 'confirm_required', __( 'Restoring a quarantined file requires confirm:true.', 'emcp-tools' ) );
+		}
+		$gate = EMCP_Tools_Filesystem_Guard::writes_allowed();
+		if ( is_wp_error( $gate ) ) {
+			return $gate;
+		}
+		$result = EMCP_Tools_File_Quarantine::restore( (string) ( $input['id'] ?? '' ), ! empty( $input['overwrite'] ) );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		if ( class_exists( 'EMCP_Tools_Change_Log' ) ) {
+			// The quarantine's own ledger entry is now undone; say so, so History
+			// does not offer an undo that would find nothing to restore.
+			if ( '' !== $result['change_id'] ) {
+				EMCP_Tools_Change_Log::mark_rolled_back( $result['change_id'] );
+			}
+			EMCP_Tools_Change_Log::record(
+				array(
+					'domain'   => 'filesystem',
+					'action'   => 'restore-quarantined-file',
+					'target'   => $result['path'],
+					'summary'  => 'Restored ' . $result['path'] . ' from quarantine',
+					'rollback' => null,
+				)
+			);
+		}
+		return $result;
 	}
 
 	/**
