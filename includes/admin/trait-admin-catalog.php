@@ -335,6 +335,11 @@ trait EMCP_Tools_Admin_Catalog_Trait {
 						'description' => __( 'Shows the hardening toggles and checks what a visitor sees: XML-RPC, the generator tag, the users REST route, author lookups, readme.html.', 'emcp-tools' ),
 						'badges'      => array( 'read-only' ),
 					),
+					'emcp-tools/search-access-log' => array(
+						'label'       => __( 'Search Access Log', 'emcp-tools' ),
+						'description' => __( 'Searches the web server access logs the site can read (plain and .gz) to find the request behind a hack. Query strings are removed from results by default.', 'emcp-tools' ),
+						'badges'      => array( 'read-only' ),
+					),
 				),
 			),
 			'filesystem'       => array(
