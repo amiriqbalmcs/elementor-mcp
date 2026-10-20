@@ -52,6 +52,7 @@ class EMCP_Tools_Schema_Compat {
 				return $callback( ...$input );
 			};
 		}
+		$args   = self::add_open_editor_override( $args );
 		$strict = self::use_strict_schemas();
 
 		if ( isset( $args['input_schema'] ) && is_array( $args['input_schema'] ) ) {
@@ -70,6 +71,46 @@ class EMCP_Tools_Schema_Compat {
 		}
 
 		return wp_register_ability( $name, $args );
+	}
+
+	/**
+	 * Gives an Elementor write tool the `ignore_open_editor` argument (#168).
+	 *
+	 * Applies while the registrar registers the Elementor tools (Page_Builders::$registering
+	 * is 'elementor'), to tools that are
+	 * not read-only and take a `post_id`. A call passing `ignore_open_editor: true`
+	 * runs with EMCP_Tools_Elementor_Editor_Sync's open-editor check switched off.
+	 *
+	 * @since 3.20.1
+	 *
+	 * @param array $args Ability arguments.
+	 * @return array
+	 */
+	private static function add_open_editor_override( array $args ): array {
+		if ( ! class_exists( 'EMCP_Tools_Elementor_Editor_Sync' ) || ! class_exists( 'EMCP_Tools_Page_Builders' ) || 'elementor' !== EMCP_Tools_Page_Builders::$registering ) {
+			return $args;
+		}
+		if ( ! empty( $args['meta']['annotations']['readonly'] ) || ! isset( $args['input_schema']['properties']['post_id'] ) || ! isset( $args['execute_callback'] ) || ! is_callable( $args['execute_callback'] ) ) {
+			return $args;
+		}
+		$arg = EMCP_Tools_Elementor_Editor_Sync::OVERRIDE_ARG;
+		$args['input_schema']['properties'][ $arg ] = array(
+			'type'        => 'boolean',
+			'description' => __( 'Write even though the page looks open in the Elementor editor with unsaved changes. Use only when the user confirms the editor was closed without saving; a later save from an open editor would discard this write.', 'emcp-tools' ),
+		);
+		$callback                 = $args['execute_callback'];
+		$args['execute_callback'] = static function ( ...$call_args ) use ( $callback, $arg ) {
+			$input = ( isset( $call_args[0] ) && is_array( $call_args[0] ) ) ? $call_args[0] : array();
+			if ( empty( $input[ $arg ] ) ) {
+				return $callback( ...$call_args );
+			}
+			return EMCP_Tools_Elementor_Editor_Sync::with_override(
+				static function () use ( $callback, $call_args ) {
+					return $callback( ...$call_args );
+				}
+			);
+		};
+		return $args;
 	}
 
 	/**

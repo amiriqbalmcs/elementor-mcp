@@ -221,10 +221,11 @@ EMCP Tools works on your own site. It contacts the services below only in the si
 
 = 3.20.1 =
 
-Four fixes from user reports.
+Five fixes from user reports.
 
 * Fixed: Atomic headings, paragraphs and buttons rendered empty on Elementor 4.3. The tools now write the text format the installed Elementor expects, and any write to a page converts text stored in the old format.
 * Fixed: A styles write through update-element or batch-update replaced the whole variant. Props now merge one by one; null removes a prop.
+* Fixed: An Elementor write to a page open in your own editor with unsaved changes is now refused, as it already was for other users, so Force Save can no longer throw it away. Retry with ignore_open_editor: true if the editor was closed without saving.
 * Fixed: insert-row returned the id of its History entry instead of the new row's id. Writes that match no rows are no longer recorded.
 * Fixed: upload-svg-icon is now recorded in History and can be undone.
 
