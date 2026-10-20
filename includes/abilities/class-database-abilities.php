@@ -190,7 +190,7 @@ class EMCP_Tools_Database_Abilities {
 		if ( is_wp_error( $out ) ) {
 			return $out;
 		}
-		return array( 'table' => $table, 'insert_id' => $rows->insert_id(), 'affected' => (int) $out['result'] ) + self::undo_fields( $out );
+		return array( 'table' => $table, 'insert_id' => (int) ( $out['insert_id'] ?? 0 ), 'affected' => (int) $out['result'] ) + self::undo_fields( $out );
 	}
 
 	/**

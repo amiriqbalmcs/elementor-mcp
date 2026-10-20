@@ -394,7 +394,7 @@ class EMCP_Tools_Layout_Abilities {
 			'emcp-tools/update-element',
 			array(
 				'label'               => __( 'Update Element', 'emcp-tools' ),
-				'description'         => __( 'Updates settings on any element (container or widget). Settings are merged (partial update). Works for all element types, no need to know if the target is a container or widget. For v4 atomic elements you may also include a `styles` map (the element\'s local CSS classes) and/or `editor_settings` (e.g. `{ "title": "Hero" }` for the Navigator label) in the settings object, these are routed to the element root automatically. Use set-element-label for just the Navigator name.', 'emcp-tools' ),
+				'description'         => __( 'Updates settings on any element (container or widget). Settings are merged (partial update). Works for all element types, no need to know if the target is a container or widget. For v4 atomic elements you may also include a `styles` map (the element\'s local CSS classes) and/or `editor_settings` (e.g. `{ "title": "Hero" }` for the Navigator label) in the settings object, these are routed to the element root automatically. Styles merge too: variants match by breakpoint and state, each prop sent replaces the stored one, a prop set to null is removed, and props you leave out are kept. Use set-element-label for just the Navigator name.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_update_element' ),
 				'permission_callback' => array( $this, 'check_edit_permission' ),
@@ -492,7 +492,7 @@ class EMCP_Tools_Layout_Abilities {
 			'emcp-tools/batch-update',
 			array(
 				'label'               => __( 'Batch Update Elements', 'emcp-tools' ),
-				'description'         => __( 'Updates multiple elements in a single save operation. Each operation specifies an element_id and settings to merge. Much more efficient than calling update-element multiple times. As with update-element, a per-operation settings object may include a `styles` map and/or `editor_settings` for v4 atomic elements, these are routed to the element root automatically.', 'emcp-tools' ),
+				'description'         => __( 'Updates multiple elements in a single save operation. Each operation specifies an element_id and settings to merge. Much more efficient than calling update-element multiple times. As with update-element, a per-operation settings object may include a `styles` map and/or `editor_settings` for v4 atomic elements, these are routed to the element root automatically and merge per variant prop (null removes a prop).', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_batch_update' ),
 				'permission_callback' => array( $this, 'check_edit_permission' ),

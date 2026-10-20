@@ -765,7 +765,9 @@ class EMCP_Tools_Data {
 
 					if ( is_array( $incoming ) ) {
 						$existing = isset( $item[ $root_key ] ) && is_array( $item[ $root_key ] ) ? $item[ $root_key ] : array();
-						$item[ $root_key ] = self::deep_merge( $existing, $incoming );
+						$item[ $root_key ] = 'styles' === $root_key
+							? self::merge_styles( $existing, $incoming )
+							: self::deep_merge( $existing, $incoming );
 					} else {
 						$item[ $root_key ] = $incoming;
 					}
@@ -839,6 +841,106 @@ class EMCP_Tools_Data {
 	 * @param array $incoming The value to merge in (wins on conflicts).
 	 * @return array The merged array.
 	 */
+	/**
+	 * Merges a `styles` write into the element's local classes (#169).
+	 *
+	 * Classes merge by id; a class set to null is removed. Within a class, variants
+	 * are matched by breakpoint and state and their props merge per prop: a prop
+	 * sent replaces the stored one, a null prop removes it, props not sent stay.
+	 * A variant whose breakpoint and state are new is appended.
+	 *
+	 * @since 3.20.1
+	 *
+	 * @param array $existing Stored styles map.
+	 * @param array $incoming Styles to write.
+	 * @return array
+	 */
+	private static function merge_styles( array $existing, array $incoming ): array {
+		foreach ( $incoming as $class_id => $def ) {
+			if ( null === $def ) {
+				unset( $existing[ $class_id ] );
+				continue;
+			}
+			if ( ! is_array( $def ) ) {
+				$existing[ $class_id ] = $def;
+				continue;
+			}
+			$current  = isset( $existing[ $class_id ] ) && is_array( $existing[ $class_id ] ) ? $existing[ $class_id ] : array();
+			$variants = $def['variants'] ?? null;
+			unset( $def['variants'] );
+			$current = self::deep_merge( $current, $def );
+			if ( is_array( $variants ) ) {
+				$current['variants'] = self::merge_variants( isset( $current['variants'] ) && is_array( $current['variants'] ) ? $current['variants'] : array(), $variants );
+			}
+			$existing[ $class_id ] = $current;
+		}
+
+		return $existing;
+	}
+
+	/**
+	 * Merges incoming style variants into the stored list.
+	 *
+	 * @since 3.20.1
+	 *
+	 * @param array $existing Stored variants.
+	 * @param array $incoming Variants to write.
+	 * @return array
+	 */
+	private static function merge_variants( array $existing, array $incoming ): array {
+		$existing = array_values( $existing );
+		foreach ( $incoming as $variant ) {
+			if ( ! is_array( $variant ) ) {
+				continue;
+			}
+			$props = isset( $variant['props'] ) && is_array( $variant['props'] ) ? $variant['props'] : array();
+			$match = null;
+			foreach ( $existing as $i => $stored ) {
+				if ( is_array( $stored ) && self::variant_key( $stored ) === self::variant_key( $variant ) ) {
+					$match = $i;
+					break;
+				}
+			}
+			if ( null === $match ) {
+				$variant['props'] = array_filter(
+					$props,
+					static function ( $value ) {
+						return null !== $value;
+					}
+				);
+				$existing[] = $variant;
+				continue;
+			}
+			$stored       = $existing[ $match ];
+			$stored_props = isset( $stored['props'] ) && is_array( $stored['props'] ) ? $stored['props'] : array();
+			foreach ( $props as $name => $value ) {
+				if ( null === $value ) {
+					unset( $stored_props[ $name ] );
+				} else {
+					$stored_props[ $name ] = $value; // A prop's envelope is replaced whole, never mixed.
+				}
+			}
+			unset( $variant['props'], $variant['meta'] );
+			$stored          = array_merge( $stored, $variant );
+			$stored['props'] = $stored_props;
+			$existing[ $match ] = $stored;
+		}
+
+		return $existing;
+	}
+
+	/**
+	 * A variant's identity: its breakpoint and state (null and absent are the same).
+	 *
+	 * @since 3.20.1
+	 *
+	 * @param array $variant Variant.
+	 */
+	private static function variant_key( array $variant ): string {
+		$meta = isset( $variant['meta'] ) && is_array( $variant['meta'] ) ? $variant['meta'] : array();
+		return (string) ( $meta['breakpoint'] ?? 'desktop' ) . '|' . (string) ( $meta['state'] ?? '' );
+	}
+
 	private static function deep_merge( array $existing, array $incoming ): array {
 		foreach ( $incoming as $key => $value ) {
 			if (

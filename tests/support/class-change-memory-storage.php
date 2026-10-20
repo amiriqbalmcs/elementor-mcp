@@ -76,6 +76,8 @@ final class EMCP_Tools_Change_Memory_Storage implements EMCP_Tools_Change_Storag
 	public $on_event = null;
 	/** @var bool Refuse single-row inserts (a History write that fails). */
 	public $refuse_insert = false;
+	/** @var callable|null Called with the new seq after a ledger row insert (a shared connection's last insert id). */
+	public $on_table_insert = null;
 	/** @var bool Refuse updates (marking an entry rolled back fails). */
 	public $refuse_update = false;
 
@@ -214,6 +216,9 @@ final class EMCP_Tools_Change_Memory_Storage implements EMCP_Tools_Change_Storag
 		}
 		$seq                = $this->next_seq++;
 		$this->rows[ $seq ] = EMCP_Tools_Change_Codec::row_from_db( $db + array( 'seq' => $seq ) );
+		if ( is_callable( $this->on_table_insert ) ) {
+			( $this->on_table_insert )( $seq );
+		}
 		return $seq;
 	}
 

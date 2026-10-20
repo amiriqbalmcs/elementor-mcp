@@ -43,7 +43,10 @@ class EMCP_Tools_DB_Change {
 	 *     @type string   $cap     Capability needed to undo (default manage_options).
 	 *     @type int      $post_id Post the rows belong to; undo then also needs edit_post on it.
 	 * }
-	 * @return array|WP_Error { result, undoable, not_undoable?, rows, change_id }
+	 * @return array|WP_Error { result, undoable, not_undoable?, rows, change_id, insert_id }
+	 *                        A write that matched no rows records nothing: change_id is ''.
+	 *                        insert_id is read straight after the write, before History's own
+	 *                        insert on the same connection moves $wpdb->insert_id (#167).
 	 */
 	public static function write( array $args ) {
 		$table  = (string) $args['table'];
@@ -64,6 +67,10 @@ class EMCP_Tools_DB_Change {
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}
+		$insert_id = self::insert_id_after( $args );
+		if ( self::matched_nothing( $args, $result ) ) {
+			return self::nothing_changed( $insert_id );
+		}
 		$id = EMCP_Tools_Change_Log::record(
 			self::entry(
 				$args,
@@ -80,6 +87,42 @@ class EMCP_Tools_DB_Change {
 			'not_undoable' => $reason,
 			'rows'         => is_int( $result ) ? $result : 0,
 			'change_id'    => $id,
+			'insert_id'    => $insert_id,
+		);
+	}
+
+	/**
+	 * The new row's auto-increment id, read before anything else writes on the connection.
+	 *
+	 * @param array $args write() arguments.
+	 */
+	private static function insert_id_after( array $args ): int {
+		return 'insert' === ( $args['op'] ?? '' ) ? EMCP_Tools_DB_Rows::driver()->insert_id() : 0;
+	}
+
+	/**
+	 * Whether an update or delete reported no rows changed.
+	 *
+	 * @param array    $args   write() arguments.
+	 * @param int|null $result Rows affected.
+	 */
+	private static function matched_nothing( array $args, $result ): bool {
+		return 'insert' !== ( $args['op'] ?? '' ) && 0 === $result;
+	}
+
+	/**
+	 * The answer for a write that changed nothing: no History entry, nothing to undo.
+	 *
+	 * @param int $insert_id Insert id (0 unless an insert).
+	 */
+	private static function nothing_changed( int $insert_id = 0 ): array {
+		return array(
+			'result'       => 0,
+			'undoable'     => false,
+			'not_undoable' => __( 'The write matched no rows, so nothing changed and History recorded nothing.', 'emcp-tools' ),
+			'rows'         => 0,
+			'change_id'    => '',
+			'insert_id'    => $insert_id,
 		);
 	}
 
@@ -135,6 +178,7 @@ class EMCP_Tools_DB_Change {
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}
+		$insert_id = self::insert_id_after( $args );
 		if ( is_int( $result ) && 'insert' !== $op && $result > count( $before ) ) {
 			return new WP_Error( 'rows_changed', __( 'The write changed rows History had not locked, so it was cancelled and nothing changed. Try again.', 'emcp-tools' ) );
 		}
@@ -144,7 +188,7 @@ class EMCP_Tools_DB_Change {
 			$keys[] = self::key_of( $row, $pk );
 		}
 		if ( 'insert' === $op ) {
-			$key = self::inserted_key( (array) ( $args['data'] ?? array() ), $pk, $rows->insert_id() );
+			$key = self::inserted_key( (array) ( $args['data'] ?? array() ), $pk, $insert_id );
 			if ( null === $key ) {
 				return new WP_Error( 'row_unidentified', __( 'History could not identify the inserted row, so the insert was cancelled and nothing changed.', 'emcp-tools' ) );
 			}
@@ -175,6 +219,9 @@ class EMCP_Tools_DB_Change {
 			$before_rows[] = $was;
 			$after[]       = self::hash_row( $now );
 		}
+		if ( empty( $ref_keys ) && 'insert' !== $op ) {
+			return self::nothing_changed();
+		}
 		if ( count( $ref_keys ) > self::CAP ) {
 			/* translators: %d: the row limit. */
 			return new WP_Error( 'too_many_rows', sprintf( __( 'This write would change more than %d rows, more than History can keep to undo it. Nothing was changed.', 'emcp-tools' ), self::CAP ), array( 'status' => 400 ) );
@@ -204,6 +251,7 @@ class EMCP_Tools_DB_Change {
 			'undoable'  => true,
 			'rows'      => count( $ref_keys ),
 			'change_id' => $id,
+			'insert_id' => $insert_id,
 		);
 	}
 

@@ -2,6 +2,15 @@
 
 All notable changes to MCP Tools for Elementor are documented in this file.
 
+## [3.20.1] - 2026-10-20
+
+> Four fixes from user reports: atomic text that rendered empty on Elementor 4.3, styles writes that dropped props, a wrong row id from `insert-row`, and SVG icon uploads History could not undo.
+
+- Fixed: **Atomic headings, paragraphs and buttons rendered empty on Elementor 4.3** ([#166](https://github.com/msrbuilds/elementor-mcp/issues/166)). Elementor 4.3 stores their text as `escaped-html`, but `add-atomic-heading`, `add-atomic-paragraph` and `add-atomic-button` wrote the older `html-v3` format, so the element showed no text until Elementor happened to convert it. The tools now write whichever format the installed Elementor declares (`escaped-html` on 4.3, `html-v3` on 4.2), and any write to a page converts text already stored in the wrong format, in either direction. Translations through Polylang and TranslatePress now include 4.3 headings and paragraphs too.
+- Fixed: **A `styles` write replaced the whole variant** ([#169](https://github.com/msrbuilds/elementor-mcp/issues/169)). `update-element` and `batch-update` replaced a style variant's props wholesale, so sending only `color` deleted `font-size`. Variants are now matched by breakpoint and state and merge prop by prop: a prop you send replaces the stored one, a prop set to `null` is removed, props you leave out are kept, and a new breakpoint or state is added. A class set to `null` is removed.
+- Fixed: **`insert-row` returned the wrong id** ([#167](https://github.com/msrbuilds/elementor-mcp/issues/167)). It reported the id of its own History entry instead of the new row's, so a follow-up update by that id changed nothing, or on a small table could change an unrelated row. It now returns the new row's id. An `update-rows` or `delete-rows` that matches no rows now says so (`undoable: false`, empty `change_id`) and adds nothing to History.
+- Fixed: **`upload-svg-icon` was not recorded in History** ([#170](https://github.com/msrbuilds/elementor-mcp/issues/170)). It now returns a `change_id` like `upload-media`, and undo removes the attachment and its file.
+
 ## [3.20.0] - 2026-10-13
 
 > Static Site generation through EMCP Cloud, backups kept out of the web root with retention for every backup, a Block Builder that honors block styles on the front end with a real repeater, and a fix for sites where another plugin took over EMCP's licence details.

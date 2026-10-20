@@ -120,6 +120,10 @@ class EMCP_Tools_Svg_Icon_Abilities {
 					'properties' => array(
 						'attachment_id' => array( 'type' => 'integer' ),
 						'url'           => array( 'type' => 'string' ),
+						'change_id'     => array(
+							'type'        => 'string',
+							'description' => __( 'History entry of the upload; rollback-change removes the attachment and its file.', 'emcp-tools' ),
+						),
 						'icon_object'   => array(
 							'type'        => 'object',
 							'description' => __( 'Ready-to-use Elementor icon object. Pass this directly as the selected_icon setting.', 'emcp-tools' ),
@@ -244,10 +248,20 @@ class EMCP_Tools_Svg_Icon_Abilities {
 			'library' => 'svg',
 		);
 
+		// Record the upload like upload-media, so History can undo it (#170).
+		$change_id = '';
+		if ( class_exists( 'EMCP_Tools_Change_Recorder' ) ) {
+			$change_id = EMCP_Tools_Change_Recorder::record_resource_create( (int) $attachment_id, 'media', 'upload-svg-icon' );
+			if ( ! EMCP_Tools_Change_Log::$suppress && '' === $change_id ) {
+				return new \WP_Error( 'history_record_failed', __( 'The SVG was uploaded, but History could not save its creation. Inspect the attachment before retrying.', 'emcp-tools' ), array( 'attachment_id' => (int) $attachment_id ) );
+			}
+		}
+
 		return array(
 			'attachment_id' => $attachment_id,
 			'url'           => $local_url,
 			'icon_object'   => $icon_object,
+			'change_id'     => $change_id,
 		);
 	}
 

@@ -3,7 +3,7 @@ Contributors: mianshahzadraza
 Tags: elementor, mcp, ai, page-builder, automation
 Requires at least: 6.9
 Tested up to: 7.1
-Stable tag: 3.20.0
+Stable tag: 3.20.1
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -218,6 +218,15 @@ EMCP Tools works on your own site. It contacts the services below only in the si
 2. Connection configuration page with copy-paste configs.
 
 == Changelog ==
+
+= 3.20.1 =
+
+Four fixes from user reports.
+
+* Fixed: Atomic headings, paragraphs and buttons rendered empty on Elementor 4.3. The tools now write the text format the installed Elementor expects, and any write to a page converts text stored in the old format.
+* Fixed: A styles write through update-element or batch-update replaced the whole variant. Props now merge one by one; null removes a prop.
+* Fixed: insert-row returned the id of its History entry instead of the new row's id. Writes that match no rows are no longer recorded.
+* Fixed: upload-svg-icon is now recorded in History and can be undone.
 
 = 3.20.0 =
 
