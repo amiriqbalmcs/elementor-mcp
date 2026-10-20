@@ -1,10 +1,12 @@
 <?php
 /**
- * Security & Malware Scanner MCP ability (read-only).
+ * Security & Malware Scanner MCP abilities.
  *
- * One tool — scan-security — that scans for malware, core-integrity, hardening,
- * outdated-software and active-compromise issues and returns a scored report. manage_options;
- * enabled by default.
+ * scan-security scans for malware, core-integrity, hardening, outdated-software
+ * and active-compromise issues and returns a scored report (read-only, enabled
+ * by default). harden-site turns the site hardening toggles on or off (write,
+ * confirm:true, disabled by default) and get-hardening-status reports them with
+ * live checks (read-only). All need manage_options.
  *
  * @package EMCP_Tools
  * @since   3.0.0
@@ -35,6 +37,8 @@ class EMCP_Tools_Security_Abilities {
 
 	public function register(): void {
 		$this->register_scan_security();
+		$this->register_harden_site();
+		$this->register_get_hardening_status();
 	}
 
 	public function check_permission(): bool {
@@ -90,5 +94,140 @@ class EMCP_Tools_Security_Abilities {
 			$input = array();
 		}
 		return $this->scanner->scan( $input );
+	}
+
+	// ---- harden-site ---------------------------------------------------
+
+	/**
+	 * @since 3.21.0
+	 */
+	private function register_harden_site(): void {
+		$this->ability_names[] = 'emcp-tools/harden-site';
+		$toggle                = array( 'type' => 'boolean' );
+		emcp_tools_register_ability(
+			'emcp-tools/harden-site',
+			array(
+				'label'               => __( 'Harden Site', 'emcp-tools' ),
+				'description'         => __( 'Turns site hardening toggles on or off. disable_xmlrpc: XML-RPC requests get a 403, the X-Pingback header, RSD link and pingback methods are removed; Jetpack, the WordPress mobile apps and other XML-RPC clients stop working, so ask first if the site uses them. hide_wp_version: removes the generator tag and replaces the ver= query on assets where it equals the WordPress version with a per-site token that still changes on every core update. block_user_enumeration: removes the /wp/v2/users REST routes for anyone who cannot list_users or edit_posts, sends logged-out ?author=N requests to the home page (302; author archives asked for by name keep working), drops the users sitemap and oEmbed author fields. hide_php_errors: sets display_errors off for anyone who cannot manage_options; it cannot change WP_DEBUG or WP_DEBUG_DISPLAY in wp-config.php, and errors raised before plugins load can still show. Toggles you leave out keep their state. Never affects WP-CLI or cron. Each change is in History, where Undo restores the previous toggles. Requires confirm:true. Disabled by default.', 'emcp-tools' ),
+				'category'            => 'emcp-tools',
+				'execute_callback'    => array( $this, 'execute_harden_site' ),
+				'permission_callback' => array( $this, 'check_permission' ),
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'toggles' => array(
+							'type'                 => 'object',
+							'description'          => __( 'Map of toggle name to true (on) or false (off).', 'emcp-tools' ),
+							'properties'           => array(
+								'disable_xmlrpc'         => $toggle,
+								'hide_wp_version'        => $toggle,
+								'block_user_enumeration' => $toggle,
+								'hide_php_errors'        => $toggle,
+							),
+						),
+						'confirm' => array( 'type' => 'boolean', 'description' => __( 'Must be true to change the toggles.', 'emcp-tools' ) ),
+					),
+					'required'   => array( 'toggles' ),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'meta'                => array(
+					'annotations'  => array( 'readonly' => false, 'destructive' => false, 'idempotent' => true ),
+					'show_in_rest' => true,
+				),
+			)
+		);
+	}
+
+	/**
+	 * @since 3.21.0
+	 *
+	 * @param array $input
+	 * @return array|\WP_Error
+	 */
+	public function execute_harden_site( $input ) {
+		if ( ! is_array( $input ) || true !== ( $input['confirm'] ?? null ) ) {
+			return new \WP_Error( 'confirm_required', __( 'Changing hardening toggles requires confirm:true.', 'emcp-tools' ) );
+		}
+		$changes = EMCP_Tools_Site_Hardening::parse_toggles( $input['toggles'] ?? null );
+		if ( is_wp_error( $changes ) ) {
+			return $changes;
+		}
+		$option   = EMCP_Tools_Site_Hardening::OPTION;
+		$prior    = get_option( $option, '__EMCP_ABSENT__' );
+		$previous = EMCP_Tools_Site_Hardening::normalize( '__EMCP_ABSENT__' === $prior ? array() : $prior );
+		$next     = EMCP_Tools_Site_Hardening::merge( $previous, $changes );
+		$result   = array(
+			'previous'  => EMCP_Tools_Site_Hardening::state_map( $previous ),
+			'current'   => EMCP_Tools_Site_Hardening::state_map( $next ),
+			'changed'   => false,
+			'change_id' => '',
+			'note'      => __( 'Toggles take effect on the next request.', 'emcp-tools' ),
+		);
+		if ( $next === $previous && ( '__EMCP_ABSENT__' === $prior || $prior === $next ) ) {
+			return $result;
+		}
+
+		if ( empty( $next ) ) {
+			delete_option( $option );
+		} else {
+			update_option( $option, $next, true );
+		}
+		$result['changed'] = true;
+
+		if ( class_exists( 'EMCP_Tools_Change_Recorder' ) ) {
+			$on  = array_keys( $next );
+			$id  = EMCP_Tools_Change_Recorder::record_options(
+				array( $option => '__EMCP_ABSENT__' === $prior ? '__ABSENT__' : $prior ),
+				empty( $on ) ? 'Turned all hardening toggles off' : 'Hardening toggles on: ' . implode( ', ', $on ),
+				'Site hardening',
+				'security',
+				'harden-site'
+			);
+			$result['change_id'] = $id;
+		}
+		return $result;
+	}
+
+	// ---- get-hardening-status --------------------------------------------
+
+	/**
+	 * @since 3.21.0
+	 */
+	private function register_get_hardening_status(): void {
+		$this->ability_names[] = 'emcp-tools/get-hardening-status';
+		emcp_tools_register_ability(
+			'emcp-tools/get-hardening-status',
+			array(
+				'label'               => __( 'Get Hardening Status', 'emcp-tools' ),
+				'description'         => __( 'Returns the harden-site toggle states plus live checks as an anonymous visitor: whether XML-RPC answers, whether the generator tag is in the home page, whether /wp/v2/users lists users, whether ?author=1 leaks an author slug, and whether readme.html and license.txt exist. Each check is one loopback request to this site. Read-only.', 'emcp-tools' ),
+				'category'            => 'emcp-tools',
+				'execute_callback'    => array( $this, 'execute_get_hardening_status' ),
+				'permission_callback' => array( $this, 'check_permission' ),
+				'input_schema'        => array( 'type' => 'object', 'properties' => array() ),
+				'output_schema'       => array(
+					'type'       => 'object',
+					'properties' => array(
+						'toggles' => array( 'type' => 'object' ),
+						'live'    => array( 'type' => 'object' ),
+						'errors'  => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+						'notes'   => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+					),
+				),
+				'meta'                => array(
+					'annotations'  => array( 'readonly' => true, 'destructive' => false, 'idempotent' => true ),
+					'show_in_rest' => true,
+				),
+			)
+		);
+	}
+
+	/**
+	 * @since 3.21.0
+	 *
+	 * @param array $input
+	 * @return array
+	 */
+	public function execute_get_hardening_status( $input ): array {
+		return ( new EMCP_Tools_Hardening_Status() )->run();
 	}
 }

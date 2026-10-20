@@ -325,6 +325,16 @@ trait EMCP_Tools_Admin_Catalog_Trait {
 						'description' => __( 'Scans for malware heuristics, core file integrity, configuration hardening, outdated/abandoned software, and signs of an active compromise (twin-folder backdoors, cloaking, public backups); returns a scored report with recommendations.', 'emcp-tools' ),
 						'badges'      => array( 'read-only' ),
 					),
+					'emcp-tools/harden-site' => array(
+						'label'       => __( 'Harden Site', 'emcp-tools' ),
+						'description' => __( 'Turns hardening toggles on or off: block XML-RPC, hide the WordPress version, block user enumeration, hide PHP errors from visitors. Undo from History. Needs confirm. Disabled by default.', 'emcp-tools' ),
+						'badges'      => array(),
+					),
+					'emcp-tools/get-hardening-status' => array(
+						'label'       => __( 'Get Hardening Status', 'emcp-tools' ),
+						'description' => __( 'Shows the hardening toggles and checks what a visitor sees: XML-RPC, the generator tag, the users REST route, author lookups, readme.html.', 'emcp-tools' ),
+						'badges'      => array( 'read-only' ),
+					),
 				),
 			),
 			'filesystem'       => array(

@@ -114,8 +114,24 @@ class EMCP_Tools_Security_Hardening_Audit {
 		);
 	}
 
-	/** @return array{ ok: bool, headers: array<string,string>, generator: bool, error: ?string } */
-	private function fetch_home(): array {
+	/**
+	 * Whether a page body carries the WordPress generator meta tag. Pure.
+	 *
+	 * @since 3.21.0
+	 *
+	 * @param string $body HTML.
+	 */
+	public function detect_generator( string $body ): bool {
+		return (bool) preg_match( '/<meta[^>]+name=["\']generator["\'][^>]+wordpress/i', $body );
+	}
+
+	/**
+	 * One loopback GET of the home page. Public since 3.21.0 so
+	 * get-hardening-status reuses it.
+	 *
+	 * @return array{ ok: bool, headers: array<string,string>, generator: bool, error: ?string }
+	 */
+	public function fetch_home(): array {
 		$res = wp_remote_get(
 			home_url( '/' ),
 			array(
@@ -129,7 +145,7 @@ class EMCP_Tools_Security_Hardening_Audit {
 		}
 		$headers = $this->normalize_headers( wp_remote_retrieve_headers( $res ) );
 		$body    = (string) wp_remote_retrieve_body( $res );
-		$gen     = (bool) preg_match( '/<meta[^>]+name=["\']generator["\'][^>]+wordpress/i', $body );
+		$gen     = $this->detect_generator( $body );
 		return array( 'ok' => true, 'headers' => $headers, 'generator' => $gen, 'error' => null );
 	}
 

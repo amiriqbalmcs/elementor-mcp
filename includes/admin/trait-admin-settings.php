@@ -387,6 +387,8 @@ trait EMCP_Tools_Admin_Settings_Trait {
 		if ( $applied < 65 ) {
 			$add[] = 'emcp-tools/quarantine-file';
 			$add[] = 'emcp-tools/restore-quarantined-file';
+		// v65: harden-site (3.21.0) ships off; get-hardening-status is read-only and stays on.
+			$add[] = 'emcp-tools/harden-site';
 		}
 		return array(
 			'add'   => array_values( array_unique( $add ) ),

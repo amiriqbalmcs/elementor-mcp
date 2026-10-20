@@ -44,6 +44,7 @@ class EMCP_Tools_Bootstrap {
 		'emcp_tools_module_image_optimization_max_dimension',
 		'emcp_tools_module_gsap_contexts',
 		'emcp_tools_module_gsap_plugins',
+		'emcp_tools_hardening',
 	);
 
 	/**
@@ -269,6 +270,8 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/class-search-index.php';
 		require_once EMCP_TOOLS_DIR . 'includes/redirects/class-redirect-store.php';
 		require_once EMCP_TOOLS_DIR . 'includes/redirects/class-redirect-handler.php';
+		// Site hardening toggles (harden-site): read on every request, hooks only what is on.
+		require_once EMCP_TOOLS_DIR . 'includes/security/class-site-hardening.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-content-mirror.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-admin-bar.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-github-updater.php';
@@ -539,6 +542,7 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-software-audit.php';
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-compromise-audit.php';
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-scanner.php';
+		require_once EMCP_TOOLS_DIR . 'includes/security/class-hardening-status.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-security-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-svg-icon-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-custom-code-abilities.php';
@@ -626,6 +630,9 @@ class EMCP_Tools_Bootstrap {
 	}
 
 	private static function wire_hooks(): void {
+		// Hardening toggles first, so a disabled XML-RPC request stops before other work.
+		// Does nothing when no toggle is on; never runs for WP-CLI or cron.
+		EMCP_Tools_Site_Hardening::init();
 		EMCP_Tools_Management_Access::init();
 		EMCP_Tools_Attention::init();
 		// structuredContent must be a JSON object; the adapter assigns a tool's
