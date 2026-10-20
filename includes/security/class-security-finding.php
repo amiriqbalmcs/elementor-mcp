@@ -19,7 +19,7 @@ class EMCP_Tools_Security_Finding {
 
 	/**
 	 * @param string $id
-	 * @param string $category       malware|integrity|hardening|software
+	 * @param string $category       malware|integrity|hardening|software|compromise
 	 * @param string $label
 	 * @param string $status         pass|warning|critical|info
 	 * @param mixed  $value

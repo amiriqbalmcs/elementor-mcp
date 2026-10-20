@@ -535,6 +535,7 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-integrity-audit.php';
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-hardening-audit.php';
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-software-audit.php';
+		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-compromise-audit.php';
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-scanner.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-security-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-svg-icon-abilities.php';

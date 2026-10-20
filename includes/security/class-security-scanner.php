@@ -3,7 +3,7 @@
  * Security & Malware Scanner orchestrator.
  *
  * resolve_checks(), summarize(), group_by_category() are pure (unit-tested).
- * scan() wires the four audits together (verified live). Read-only.
+ * scan() wires the five audits together (verified live). Read-only.
  *
  * @package EMCP_Tools
  * @since   3.0.0
@@ -23,7 +23,7 @@ class EMCP_Tools_Security_Scanner {
 	const CATEGORY_CRIT_CAP = 60;
 	const TOP_RECS          = 8;
 
-	const ALL_CHECKS = array( 'malware', 'integrity', 'hardening', 'software' );
+	const ALL_CHECKS = array( 'malware', 'integrity', 'hardening', 'software', 'compromise' );
 
 	/** @var EMCP_Tools_Security_Malware_Audit|null Built on first use. */
 	private $malware;
@@ -33,6 +33,8 @@ class EMCP_Tools_Security_Scanner {
 	private $hardening;
 	/** @var EMCP_Tools_Security_Software_Audit|null Built on first use. */
 	private $software;
+	/** @var EMCP_Tools_Security_Compromise_Audit|null Built on first use. */
+	private $compromise;
 
 	/**
 	 * Audits are built lazily, on the first scan that needs them.
@@ -50,12 +52,14 @@ class EMCP_Tools_Security_Scanner {
 		?EMCP_Tools_Security_Malware_Audit $malware = null,
 		?EMCP_Tools_Security_Integrity_Audit $integrity = null,
 		?EMCP_Tools_Security_Hardening_Audit $hardening = null,
-		?EMCP_Tools_Security_Software_Audit $software = null
+		?EMCP_Tools_Security_Software_Audit $software = null,
+		?EMCP_Tools_Security_Compromise_Audit $compromise = null
 	) {
-		$this->malware   = $malware;
-		$this->integrity = $integrity;
-		$this->hardening = $hardening;
-		$this->software  = $software;
+		$this->malware    = $malware;
+		$this->integrity  = $integrity;
+		$this->hardening  = $hardening;
+		$this->software   = $software;
+		$this->compromise = $compromise;
 	}
 
 	private function malware(): EMCP_Tools_Security_Malware_Audit {
@@ -84,6 +88,13 @@ class EMCP_Tools_Security_Scanner {
 			$this->software = new EMCP_Tools_Security_Software_Audit();
 		}
 		return $this->software;
+	}
+
+	private function compromise(): EMCP_Tools_Security_Compromise_Audit {
+		if ( null === $this->compromise ) {
+			$this->compromise = new EMCP_Tools_Security_Compromise_Audit();
+		}
+		return $this->compromise;
 	}
 
 	/**
@@ -129,6 +140,7 @@ class EMCP_Tools_Security_Scanner {
 			'checks_run'         => $checks,
 			'integrity_api'      => array( 'ok' => false, 'error' => 'not_run' ),
 			'headers_fetch'      => array( 'ok' => false, 'error' => 'not_run' ),
+			'compromise'         => array( 'error' => 'not_run' ),
 			'elapsed_ms'         => 0,
 		);
 
@@ -152,6 +164,11 @@ class EMCP_Tools_Security_Scanner {
 		}
 		if ( in_array( 'software', $checks, true ) ) {
 			$findings = array_merge( $findings, $this->software()->run() );
+		}
+		if ( in_array( 'compromise', $checks, true ) ) {
+			$c = $this->compromise()->run( $max_seconds );
+			$findings = array_merge( $findings, $c['findings'] );
+			$scan_meta['compromise'] = $c['stats'];
 		}
 
 		$summary               = $this->summarize( $findings );
@@ -215,7 +232,7 @@ class EMCP_Tools_Security_Scanner {
 	 * @return array category => Finding[]
 	 */
 	public function group_by_category( array $findings ): array {
-		$sections = array( 'malware' => array(), 'integrity' => array(), 'hardening' => array(), 'software' => array() );
+		$sections = array( 'malware' => array(), 'integrity' => array(), 'hardening' => array(), 'software' => array(), 'compromise' => array() );
 		foreach ( $findings as $f ) {
 			$cat = (string) ( $f['category'] ?? 'malware' );
 			if ( ! isset( $sections[ $cat ] ) ) {

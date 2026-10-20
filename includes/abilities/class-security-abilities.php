@@ -3,7 +3,7 @@
  * Security & Malware Scanner MCP ability (read-only).
  *
  * One tool — scan-security — that scans for malware, core-integrity, hardening,
- * and outdated-software issues and returns a scored report. manage_options;
+ * outdated-software and active-compromise issues and returns a scored report. manage_options;
  * enabled by default.
  *
  * @package EMCP_Tools
@@ -47,7 +47,7 @@ class EMCP_Tools_Security_Abilities {
 			'emcp-tools/scan-security',
 			array(
 				'label'               => __( 'Scan Security', 'emcp-tools' ),
-				'description'         => __( 'Scans this WordPress site for security and malware problems across four areas: PHP malware heuristics (uploads + active plugins/themes; pass deep=true for the whole tree), WordPress core file integrity (vs official wordpress.org checksums), configuration hardening (file editor, debug output, admin username, XML-RPC, version disclosure, HTTPS, security headers), and outdated/abandoned software. Returns a scored report (0-100 + A-F grade) with severities and ranked, actionable recommendations. Read-only; self-contained; scans this site only.', 'emcp-tools' ),
+				'description'         => __( 'Scans this WordPress site for security and malware problems across five areas: PHP malware heuristics (uploads + active plugins/themes; pass deep=true for the whole tree), WordPress core file integrity (vs official wordpress.org checksums), configuration hardening (file editor, debug output, admin username, XML-RPC, version disclosure, HTTPS, security headers), outdated/abandoned software, and signs of an active compromise (hidden twin-folder backdoors, back-dated PHP files, search-engine cloaking, publicly downloadable backups, suspicious must-use plugins, orphaned scheduled tasks). Returns a scored report (0-100 + A-F grade) with severities and ranked, actionable recommendations. Read-only; self-contained; scans this site only.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_scan_security' ),
 				'permission_callback' => array( $this, 'check_permission' ),
@@ -56,12 +56,12 @@ class EMCP_Tools_Security_Abilities {
 					'properties' => array(
 						'checks'      => array(
 							'type'        => 'array',
-							'items'       => array( 'type' => 'string', 'enum' => array( 'malware', 'integrity', 'hardening', 'software' ) ),
-							'description' => __( 'Subset of audits to run. Omit to run all four.', 'emcp-tools' ),
+							'items'       => array( 'type' => 'string', 'enum' => array( 'malware', 'integrity', 'hardening', 'software', 'compromise' ) ),
+							'description' => __( 'Subset of audits to run. Omit to run all five.', 'emcp-tools' ),
 						),
 						'deep'        => array( 'type' => 'boolean', 'description' => __( 'When true, the malware scan covers ALL plugins/themes and the wider tree (slower). Default false: uploads + active plugins/themes only.', 'emcp-tools' ) ),
 						'max_files'   => array( 'type' => 'integer', 'description' => __( 'Override the malware file-count cap (default 2000, ceiling 20000).', 'emcp-tools' ) ),
-						'max_seconds' => array( 'type' => 'integer', 'description' => __( 'Override the malware scan time budget in seconds (default 20, ceiling 120).', 'emcp-tools' ) ),
+						'max_seconds' => array( 'type' => 'integer', 'description' => __( 'Time budget in seconds for the malware scan and, separately, for the compromise audit (default 20, ceiling 120). A compromise audit that runs out of time says which checks were only partly covered.', 'emcp-tools' ) ),
 					),
 				),
 				'output_schema'       => array(

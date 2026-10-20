@@ -322,7 +322,7 @@ trait EMCP_Tools_Admin_Catalog_Trait {
 					),
 					'emcp-tools/scan-security' => array(
 						'label'       => __( 'Scan Security', 'emcp-tools' ),
-						'description' => __( 'Scans for malware heuristics, core file integrity, configuration hardening, and outdated/abandoned software; returns a scored report with recommendations.', 'emcp-tools' ),
+						'description' => __( 'Scans for malware heuristics, core file integrity, configuration hardening, outdated/abandoned software, and signs of an active compromise (twin-folder backdoors, cloaking, public backups); returns a scored report with recommendations.', 'emcp-tools' ),
 						'badges'      => array( 'read-only' ),
 					),
 				),
