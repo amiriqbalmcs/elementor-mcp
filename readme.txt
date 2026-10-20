@@ -3,7 +3,7 @@ Contributors: mianshahzadraza
 Tags: elementor, mcp, ai, page-builder, automation
 Requires at least: 6.9
 Tested up to: 7.1
-Stable tag: 3.20.1
+Stable tag: 3.21.0
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -218,6 +218,17 @@ EMCP Tools works on your own site. It contacts the services below only in the si
 2. Connection configuration page with copy-paste configs.
 
 == Changelog ==
+
+= 3.21.0 =
+
+Incident-response tools for a hacked site, contributed by @Mrshahidali420.
+
+* New: scan-security has a compromise audit: hidden twin-folder back doors, back-dated files, search-engine cloaking, publicly downloadable backups, suspicious must-use plugins and orphaned scheduled tasks, plus three new malware rules.
+* New: quarantine-file, restore-quarantined-file and list-quarantine move a suspicious file out of the site without losing it, renamed so it cannot run, and back again from History.
+* New: harden-site and get-hardening-status switch off XML-RPC, hide the WordPress version, block user enumeration and hide PHP errors, each undoable.
+* New: search-access-log finds the request behind a hack in the web server access logs.
+* New: list-processes and kill-process find and stop a watcher process that keeps rewriting files (Linux; server processes are never stopped).
+* The tools that change the site, read server logs or list processes ship switched off.
 
 = 3.20.1 =
 
