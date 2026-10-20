@@ -382,13 +382,18 @@ trait EMCP_Tools_Admin_Settings_Trait {
 		if ( $applied < 64 ) {
 			$add[] = 'emcp-tools/delete-term';
 		}
-		// v65: quarantine-file and restore-quarantined-file (3.21.0) ship off;
-		// list-quarantine is read-only and stays on.
+		// v65 (3.21.0): the incident-response tools ship off. quarantine-file,
+		// restore-quarantined-file, harden-site and kill-process change the site;
+		// search-access-log reads server logs outside WordPress and list-processes
+		// shows the account's processes, so both are opt-in too. scan-security's
+		// compromise audit, list-quarantine and get-hardening-status stay on.
 		if ( $applied < 65 ) {
 			$add[] = 'emcp-tools/quarantine-file';
 			$add[] = 'emcp-tools/restore-quarantined-file';
-		// v65: harden-site (3.21.0) ships off; get-hardening-status is read-only and stays on.
 			$add[] = 'emcp-tools/harden-site';
+			$add[] = 'emcp-tools/search-access-log';
+			$add[] = 'emcp-tools/list-processes';
+			$add[] = 'emcp-tools/kill-process';
 		}
 		return array(
 			'add'   => array_values( array_unique( $add ) ),

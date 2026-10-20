@@ -340,6 +340,16 @@ trait EMCP_Tools_Admin_Catalog_Trait {
 						'description' => __( 'Searches the web server access logs the site can read (plain and .gz) to find the request behind a hack. Query strings are removed from results by default.', 'emcp-tools' ),
 						'badges'      => array( 'read-only' ),
 					),
+					'emcp-tools/list-processes' => array(
+						'label'       => __( 'List Processes', 'emcp-tools' ),
+						'description' => __( 'Lists processes running as the site user (Linux only) and flags suspicious ones, such as shell loops running from /tmp.', 'emcp-tools' ),
+						'badges'      => array( 'read-only' ),
+					),
+					'emcp-tools/kill-process' => array(
+						'label'       => __( 'Kill Process', 'emcp-tools' ),
+						'description' => __( 'Stops one listed process (TERM or KILL, needs confirm). Cannot be undone. Disabled by default.', 'emcp-tools' ),
+						'badges'      => array(),
+					),
 				),
 			),
 			'filesystem'       => array(

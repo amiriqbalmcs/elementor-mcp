@@ -547,6 +547,8 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-access-log-parser.php';
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-access-log-search.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-access-log-abilities.php';
+		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-process-inspector.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-process-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-svg-icon-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-custom-code-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-sandbox-cloud-abilities.php';

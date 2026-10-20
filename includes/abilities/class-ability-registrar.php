@@ -611,6 +611,10 @@ class EMCP_Tools_Ability_Registrar {
 		$access_log = new EMCP_Tools_Access_Log_Abilities();
 		$access_log->register();
 		$this->ability_names = array_merge( $this->ability_names, $access_log->get_ability_names() );
+		// Processes (list read-only; kill disabled-by-default, confirm:true). Linux only.
+		$processes = new EMCP_Tools_Process_Abilities();
+		$processes->register();
+		$this->ability_names = array_merge( $this->ability_names, $processes->get_ability_names() );
 
 		// PHP Snippet abilities (Sandbox) — free, capability-gated, no Elementor.
 		if ( class_exists( 'EMCP_Tools_PHP_Snippet_Abilities' ) ) {
