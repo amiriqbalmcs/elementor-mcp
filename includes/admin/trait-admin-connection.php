@@ -471,24 +471,25 @@ trait EMCP_Tools_Admin_Connection_Trait {
 			'template' => "{\n    \"mcpServers\": {\n        \"%NAME%\": {\n            \"url\": \"%ENDPOINT%\"\n        }\n    }\n}",
 			'deeplink' => 'cursor',
 		);
-		// The ChatGPT App signs in through its own MCP UI (Add server → Streamable
-		// HTTP → Authenticate), not a config file — config.toml has no OAuth path.
+		// The ChatGPT App signs in through its own MCP UI (Settings → MCP servers →
+		// Add server → Streamable HTTP → Save → Restart → Authenticate). Codex is
+		// part of the desktop app since July 2026 and shares its MCP settings.
 		$oauth_codex = array(
 			'type'  => 'steps',
 			'steps' => array(
 				array(
 					'title' => __( 'a. Open the MCP settings', 'emcp-tools' ),
-					'desc'  => __( 'In the ChatGPT app, go to File → Settings → Plugins, switch to the MCP tab, and click “Add server”.', 'emcp-tools' ),
+					'desc'  => __( 'In the ChatGPT desktop app, open Settings, select “MCP servers”, and click “Add server”.', 'emcp-tools' ),
 				),
 				array(
 					'title' => __( 'b. Choose Streamable HTTP', 'emcp-tools' ),
-					'desc'  => __( 'Set Type to “Streamable HTTP”, then enter a name and this server URL:', 'emcp-tools' ),
+					'desc'  => __( 'Choose “Streamable HTTP”, then enter a name and this server URL:', 'emcp-tools' ),
 				),
 				array( 'title' => __( 'Name', 'emcp-tools' ), 'copy' => '%NAME%' ),
 				array( 'title' => __( 'URL', 'emcp-tools' ), 'copy' => '%ENDPOINT%' ),
 				array(
-					'title' => __( 'c. Save, then Authenticate', 'emcp-tools' ),
-					'desc'  => __( 'Click Save. An “Authenticate” button appears on the server row, click it, then “Approve” on the consent screen that opens. Your site is now connected and you can start chatting.', 'emcp-tools' ),
+					'title' => __( 'c. Save, Restart, then Authenticate', 'emcp-tools' ),
+					'desc'  => __( 'Click Save, then Restart. Click “Authenticate” on the server row, then “Approve” on the consent screen that opens. Your site is now connected and you can start chatting.', 'emcp-tools' ),
 				),
 			),
 		);
@@ -534,7 +535,7 @@ trait EMCP_Tools_Admin_Connection_Trait {
 		// with the live endpoint + Basic-auth token in JS (escaped). HTML tags are
 		// kept outside the translation calls so they are not escaped.
 		$codex_guide = '<p class="description">'
-			. esc_html__( 'Prefer the ChatGPT App\'s UI? Choose “Connect to a custom MCP” → “Streamable HTTP”, then fill the form like this:', 'emcp-tools' )
+			. esc_html__( 'Prefer the ChatGPT App\'s UI? Open Settings → MCP servers → Add server, choose “Streamable HTTP”, then fill the form like this:', 'emcp-tools' )
 			. '</p>'
 			. '<table class="emcp-conn-guide"><tbody>'
 			. '<tr><th>' . esc_html__( 'Name', 'emcp-tools' ) . '</th><td><code>%NAME%</code></td></tr>'
@@ -543,7 +544,7 @@ trait EMCP_Tools_Admin_Connection_Trait {
 			. '<tr><th>' . esc_html__( 'Bearer token env var', 'emcp-tools' ) . '</th><td>' . esc_html__( 'Leave blank, EMCP uses a WordPress Application Password (HTTP Basic), not a bearer token.', 'emcp-tools' ) . '</td></tr>'
 			. '<tr><th>' . esc_html__( 'Headers', 'emcp-tools' ) . '</th><td>' . esc_html__( 'Key', 'emcp-tools' ) . ' <code>Authorization</code> &middot; ' . esc_html__( 'Value', 'emcp-tools' ) . ' <code>Basic %B64%</code></td></tr>'
 			. '</tbody></table>'
-			. '<p class="description">' . esc_html__( 'Then Save. The config blocks below do the same thing, “direct HTTP” for the URL + header approach, or the “Node proxy / npx” config if the HTTP transport gives you handshake trouble.', 'emcp-tools' ) . '</p>';
+			. '<p class="description">' . esc_html__( 'Then Save and Restart. The config blocks below do the same thing, “direct HTTP” for the URL + header approach, or the “Node proxy / npx” config if the HTTP transport gives you handshake trouble.', 'emcp-tools' ) . '</p>';
 
 		return array(
 			array(
