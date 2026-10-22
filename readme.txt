@@ -221,19 +221,23 @@ EMCP Tools works on your own site. It contacts the services below only in the si
 
 = 3.21.0 =
 
-Incident-response tools for a hacked site, contributed by @Mrshahidali420, and five fixes from user reports.
+Incident-response tools for a hacked site, contributed by @Mrshahidali420, binary file writes, and fixes for subdirectory multisite OAuth, backups, the connection steps and five user reports.
 
 * New: scan-security has a compromise audit: hidden twin-folder back doors, back-dated files, search-engine cloaking, publicly downloadable backups, suspicious must-use plugins and orphaned scheduled tasks, plus three new malware rules.
 * New: quarantine-file, restore-quarantined-file and list-quarantine move a suspicious file out of the site without losing it, renamed so it cannot run, and back again from History.
 * New: harden-site and get-hardening-status switch off XML-RPC, hide the WordPress version, block user enumeration and hide PHP errors, each undoable.
 * New: search-access-log finds the request behind a hack in the web server access logs.
 * New: list-processes and kill-process find and stop a watcher process that keeps rewriting files (Linux; server processes are never stopped).
+* New: write-file writes binary files (images, fonts, ZIP) with encoding "base64", up to 5 MB.
 * The tools that change the site, read server logs or list processes ship switched off.
 * Fixed: Atomic headings, paragraphs and buttons rendered empty on Elementor 4.3. The tools now write the text format the installed Elementor expects, and any write to a page converts text stored in the old format.
 * Fixed: A styles write through update-element or batch-update replaced the whole variant. Props now merge one by one; null removes a prop.
 * Fixed: An Elementor write to a page open in your own editor with unsaved changes is now refused, as it already was for other users, so Force Save can no longer throw it away. Retry with ignore_open_editor: true if the editor was closed without saving.
 * Fixed: insert-row returned the id of its History entry instead of the new row's id. Writes that match no rows are no longer recorded.
 * Fixed: upload-svg-icon is now recorded in History and can be undone.
+* Fixed: OAuth sign-in works on the subsites of a subdirectory multisite.
+* Fixed: the Connection wizard shows ChatGPT's current MCP settings path and a Codex command that Codex accepts.
+* Security: full backups no longer include wp-config.php, which holds the database password and the site's secret keys.
 
 = 3.20.0 =
 

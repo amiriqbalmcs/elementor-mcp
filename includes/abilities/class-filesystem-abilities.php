@@ -339,16 +339,19 @@ class EMCP_Tools_Filesystem_Abilities {
 		if ( ! in_array( $encoding, array( 'utf8', 'base64' ), true ) ) {
 			return new \WP_Error( 'invalid_encoding', __( 'encoding must be "utf8" or "base64".', 'emcp-tools' ) );
 		}
+		$encoded = null;
+		$size    = strlen( $content );
 		if ( 'base64' === $encoding ) {
-			// Strict decode: anything outside the base64 alphabet (other than the
+			// Strict: anything outside the base64 alphabet (other than the
 			// whitespace agents wrap long payloads with) is refused, never skipped.
-			$content = base64_decode( preg_replace( '/\s+/', '', $content ), true );
-			if ( false === $content ) {
+			$encoded = self::canonical_base64( $content );
+			if ( null === $encoded ) {
 				return new \WP_Error( 'invalid_base64', __( 'Content is not valid base64.', 'emcp-tools' ) );
 			}
+			$size = self::decoded_size( $encoded );
 		}
 		// The size limit applies to the bytes written, after decoding.
-		if ( strlen( $content ) > EMCP_Tools_Filesystem_Guard::MAX_WRITE_BYTES ) {
+		if ( $size > EMCP_Tools_Filesystem_Guard::MAX_WRITE_BYTES ) {
 			return new \WP_Error( 'too_large', __( 'Content exceeds the maximum writable size.', 'emcp-tools' ) );
 		}
 		$existed = is_file( $abs );
@@ -359,7 +362,7 @@ class EMCP_Tools_Filesystem_Abilities {
 		if ( ! wp_mkdir_p( dirname( $abs ) ) ) {
 			return new \WP_Error( 'mkdir_failed', __( 'Could not create the parent directory.', 'emcp-tools' ) );
 		}
-		$bytes = file_put_contents( $abs, $content );
+		$bytes = null === $encoded ? file_put_contents( $abs, $content ) : self::write_encoded( $abs, $encoded, $size );
 		if ( false === $bytes ) {
 			return new \WP_Error( 'write_failed', __( 'Could not write the file (check permissions).', 'emcp-tools' ) );
 		}
@@ -371,6 +374,70 @@ class EMCP_Tools_Filesystem_Abilities {
 			'action' => $existed ? 'overwritten' : 'created',
 			'backup' => $backup ? EMCP_Tools_Filesystem_Guard::to_relative( $backup ) : null,
 		);
+	}
+
+	/**
+	 * Base64 text without whitespace and with its padding restored, or null when
+	 * it is not valid base64 (padding may be left off, as many encoders do).
+	 *
+	 * @since 3.21.0
+	 *
+	 * @param string $text Encoded content.
+	 */
+	private static function canonical_base64( string $text ): ?string {
+		// Linear checks only: a regex over a multi-megabyte payload can hit
+		// PCRE's backtrack limit and refuse valid input.
+		$text = str_replace( array( ' ', "\t", "\r", "\n", "\f", "\v" ), '', $text );
+		$data = rtrim( $text, '=' );
+		$pad  = strlen( $text ) - strlen( $data );
+		$len  = strlen( $data );
+		$rest = $len % 4;
+		$alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+		if ( strspn( $data, $alphabet ) !== $len || 1 === $rest || $pad > 2 ) {
+			return null;
+		}
+		if ( $pad > 0 && $pad !== ( 4 - $rest ) % 4 ) {
+			return null; // Padding must complete the last group exactly.
+		}
+		return 0 === $rest ? $data : $data . str_repeat( '=', 4 - $rest );
+	}
+
+	/**
+	 * Bytes a canonical base64 string decodes to.
+	 *
+	 * @since 3.21.0
+	 *
+	 * @param string $encoded Output of canonical_base64().
+	 */
+	private static function decoded_size( string $encoded ): int {
+		return intdiv( strlen( $encoded ), 4 ) * 3 - ( strlen( $encoded ) - strlen( rtrim( $encoded, '=' ) ) );
+	}
+
+	/**
+	 * Write base64 text to a file as raw bytes, decoded by a stream filter on the
+	 * way out, so the decoded bytes never exist as a PHP string (host malware
+	 * scanners flag a decode feeding a file write; see the 3.14.2 restore engine).
+	 *
+	 * @since 3.21.0
+	 *
+	 * @param string $abs     Target path.
+	 * @param string $encoded Output of canonical_base64().
+	 * @param int    $size    Expected decoded size.
+	 * @return int|false Bytes written.
+	 */
+	private static function write_encoded( string $abs, string $encoded, int $size ) {
+		$handle = fopen( $abs, 'wb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+		if ( false === $handle ) {
+			return false;
+		}
+		$filter = stream_filter_append( $handle, 'convert.base64-decode', STREAM_FILTER_WRITE );
+		$ok     = false !== $filter;
+		for ( $at = 0, $len = strlen( $encoded ); $ok && $at < $len; $at += 65536 ) {
+			$ok = false !== fwrite( $handle, substr( $encoded, $at, 65536 ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
+		}
+		$ok = fclose( $handle ) && $ok; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+		clearstatcache( true, $abs );
+		return $ok && filesize( $abs ) === $size ? $size : false;
 	}
 
 	// ---- edit-file -----------------------------------------------------

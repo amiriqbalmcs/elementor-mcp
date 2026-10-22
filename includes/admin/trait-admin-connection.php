@@ -442,7 +442,13 @@ trait EMCP_Tools_Admin_Connection_Trait {
 	 */
 	public static function connection_clients(): array {
 		$claude_cli = 'claude mcp add --transport http %NAME% "%ENDPOINT%" --header "Authorization: Basic %B64%"';
-		$codex_cli  = 'codex mcp add %NAME% --transport http --url "%ENDPOINT%" --header "Authorization=Basic %B64%"';
+		// Codex CLI has no --transport or --header (checked on codex-cli 0.163):
+		// `--url` makes a streamable HTTP server, and a Basic header can only live
+		// in config.toml. The follow-up lines are shell comments, so pasting the
+		// whole block is harmless; the TOML block below shows the full entry.
+		$codex_cli = 'codex mcp add %NAME% --url "%ENDPOINT%"'
+			. "\n# Then add this line under [mcp_servers.%NAME%] in ~/.codex/config.toml:"
+			. "\n" . '# http_headers = { "Authorization" = "Basic %B64%" }';
 
 		// OAuth-mode setup per client — the browser sign-in supplies auth, so no
 		// password. Shapes: 'cmd' (terminal command), 'connector' (custom-connector
