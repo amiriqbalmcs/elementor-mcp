@@ -5,7 +5,8 @@
  * Runs on `wp_generate_attachment_metadata`: preserves the full-size (only
  * trimmed when a max-dimension cap is set), backs up each file it touches under
  * `uploads/emcp-originals/`, re-compresses the generated sub-sizes in place, and
- * (when enabled) generates a `.webp` sibling per size. Records per-attachment
+ * (when enabled) generates a `.webp` sibling per size from the untouched file,
+ * keeping it only when it is smaller than the image. Records per-attachment
  * results in `_emcp_optim` meta and is idempotent (status=done short-circuits).
  *
  * @package EMCP_Tools
@@ -25,17 +26,26 @@ class EMCP_Tools_Image_Optimizer {
 
 	const META_KEY = '_emcp_optim';
 
-	/** @var array{compress:bool,webp:bool,quality:int,max_dimension:int,keep_originals:bool} */
+	/**
+	 * How far below the JPEG quality the automatic WebP quality sits. WebP
+	 * matches a JPEG's look at a lower number: on sample photos WebP at 45
+	 * kept more detail than JPEG at 60 and was 15% smaller.
+	 */
+	const WEBP_QUALITY_OFFSET = 15;
+
+	/** @var array{compress:bool,webp:bool,quality:int,webp_quality:int,max_dimension:int,keep_originals:bool} */
 	private $settings;
 
 	/**
 	 * @param array $settings Module settings (see module option map).
 	 */
 	public function __construct( array $settings ) {
+		$quality        = self::clamp_quality( (int) ( $settings['quality'] ?? 60 ) );
 		$this->settings = array(
 			'compress'       => ! empty( $settings['compress'] ),
 			'webp'           => ! empty( $settings['webp'] ),
-			'quality'        => self::clamp_quality( (int) ( $settings['quality'] ?? 60 ) ),
+			'quality'        => $quality,
+			'webp_quality'   => self::webp_quality( (int) ( $settings['webp_quality'] ?? 0 ), $quality ),
 			'max_dimension'  => max( 0, (int) ( $settings['max_dimension'] ?? 0 ) ),
 			'keep_originals' => ! empty( $settings['keep_originals'] ),
 		);
@@ -49,6 +59,35 @@ class EMCP_Tools_Image_Optimizer {
 	 */
 	public static function clamp_quality( int $q ): int {
 		return max( 1, min( 100, $q ) );
+	}
+
+	/**
+	 * The quality WebP siblings are encoded at.
+	 *
+	 * @param int $webp_quality Stored WebP quality (0 = automatic).
+	 * @param int $jpeg_quality JPEG quality.
+	 * @return int The stored value, or the JPEG quality less WEBP_QUALITY_OFFSET.
+	 */
+	public static function webp_quality( int $webp_quality, int $jpeg_quality ): int {
+		if ( $webp_quality > 0 ) {
+			return self::clamp_quality( $webp_quality );
+		}
+		return self::clamp_quality( $jpeg_quality - self::WEBP_QUALITY_OFFSET );
+	}
+
+	/**
+	 * The file a WebP sibling is encoded from: the untouched backup under
+	 * `emcp-originals` when there is one, else the file itself (which
+	 * process_files() then encodes before re-compressing it). Encoding from the
+	 * re-compressed JPEG stacks a second lossy pass on the first and gave
+	 * siblings no smaller than the JPEG.
+	 *
+	 * @param string $file   Absolute image path.
+	 * @param string $backup Its backup path (see backup_path()).
+	 * @return string Absolute path to encode from.
+	 */
+	public static function webp_source( string $file, string $backup ): string {
+		return ( '' !== $backup && file_exists( $backup ) ) ? $backup : $file;
 	}
 
 	/**
@@ -155,7 +194,7 @@ class EMCP_Tools_Image_Optimizer {
 	 * @return array Result meta.
 	 */
 	public function process_files( array $files, array $upload, string $full_rel, string $basedir ): array {
-		$generator  = new EMCP_Tools_Webp_Generator( $this->settings['quality'] );
+		$generator  = new EMCP_Tools_Webp_Generator( $this->settings['webp_quality'] );
 		$webp_ok    = $this->settings['webp'] && $generator->is_available();
 		$full_abs   = '' !== $full_rel ? rtrim( $basedir, '/\\' ) . '/' . $full_rel : '';
 		$before     = 0;
@@ -170,8 +209,8 @@ class EMCP_Tools_Image_Optimizer {
 			}
 			$before += (int) filesize( $file );
 
+			$backup = self::backup_path( $file, $upload );
 			if ( $this->settings['keep_originals'] ) {
-				$backup = self::backup_path( $file, $upload );
 				if ( ! file_exists( $backup ) ) {
 					wp_mkdir_p( dirname( $backup ) );
 					@copy( $file, $backup );
@@ -179,12 +218,22 @@ class EMCP_Tools_Image_Optimizer {
 				}
 			}
 
+			$source    = self::webp_source( $file, $backup );
+			$cap       = $this->settings['compress'] && $this->settings['max_dimension'] > 0 && $file === $full_abs ? $this->settings['max_dimension'] : 0;
+			$webp_done = false;
+			if ( $webp_ok && $source === $file && $this->settings['compress'] ) {
+				// No untouched copy outlives the re-save below: encode WebP first.
+				$this->write_webp( $generator, $file, $file, $cap );
+				$webp_done = true;
+			}
+
 			$editor = wp_get_image_editor( $file );
 			if ( ! is_wp_error( $editor ) ) {
-				$editor->set_quality( $this->settings['quality'] );
 				if ( $this->settings['max_dimension'] > 0 && $file === $full_abs ) {
 					$editor->resize( $this->settings['max_dimension'], $this->settings['max_dimension'], false );
 				}
+				// After resize(): WP_Image_Editor resets the quality to its default there.
+				$editor->set_quality( $this->settings['quality'] );
 				if ( $this->settings['compress'] ) {
 					$editor->save( $file );
 				}
@@ -193,10 +242,22 @@ class EMCP_Tools_Image_Optimizer {
 			$after += (int) filesize( $file );
 
 			if ( $webp_ok ) {
-				$sibling = $generator->generate( $file );
-				if ( ! is_wp_error( $sibling ) && file_exists( $sibling ) ) {
-					$webps[]     = $sibling;
-					$webp_bytes += (int) filesize( $sibling );
+				if ( ! $webp_done ) {
+					// A backup can be larger than the file (capped, or resized
+					// by resize-media): scale it to the file's own size.
+					$max_side = $cap > 0 ? $cap : ( $source !== $file ? self::longest_side( $file ) : 0 );
+					$this->write_webp( $generator, $file, $source, $max_side );
+				}
+				$sibling = EMCP_Tools_Webp_Generator::sibling_path( $file );
+				clearstatcache( true, $sibling );
+				if ( file_exists( $sibling ) ) {
+					if ( filesize( $sibling ) < filesize( $file ) ) {
+						$webps[]     = $sibling;
+						$webp_bytes += (int) filesize( $sibling );
+					} else {
+						// Serving it would make the page heavier, not lighter.
+						@unlink( $sibling );
+					}
 				}
 			}
 		}
@@ -209,5 +270,33 @@ class EMCP_Tools_Image_Optimizer {
 			'backups'         => $backups,
 			'webps'           => $webps,
 		);
+	}
+
+	/**
+	 * Encode the WebP sibling of $file from $source. A sibling no smaller than
+	 * $file (left by versions that encoded from the compressed JPEG) is
+	 * replaced; a smaller one is kept.
+	 *
+	 * @param EMCP_Tools_Webp_Generator $generator Generator.
+	 * @param string                    $file      Image the sibling belongs to.
+	 * @param string                    $source    File to encode from.
+	 * @param int                       $max_side  Fit box for the source (0 = keep).
+	 */
+	private function write_webp( EMCP_Tools_Webp_Generator $generator, string $file, string $source, int $max_side ): void {
+		$sibling = EMCP_Tools_Webp_Generator::sibling_path( $file );
+		clearstatcache( true, $sibling );
+		if ( file_exists( $sibling ) && filesize( $sibling ) >= filesize( $file ) ) {
+			@unlink( $sibling );
+		}
+		$generator->generate( $file, $source, $max_side );
+	}
+
+	/**
+	 * @param string $file Absolute image path.
+	 * @return int Its longer side in pixels, 0 when unreadable.
+	 */
+	private static function longest_side( string $file ): int {
+		$size = @getimagesize( $file );
+		return is_array( $size ) ? max( (int) $size[0], (int) $size[1] ) : 0;
 	}
 }

@@ -104,6 +104,13 @@ class EMCP_Tools_Image_Optimization_Module extends EMCP_Tools_Module {
 				'default'           => '60',
 				'sanitize_callback' => $int,
 			),
+			self::PREFIX . 'webp_quality'   => array(
+				'type'              => 'string',
+				'default'           => '0',
+				'sanitize_callback' => static function ( $v ) {
+					return (string) max( 0, min( 100, (int) $v ) );
+				},
+			),
 			self::PREFIX . 'max_dimension'  => array(
 				'type'              => 'string',
 				'default'           => '0',
@@ -122,8 +129,9 @@ class EMCP_Tools_Image_Optimization_Module extends EMCP_Tools_Module {
 		return array(
 			array( 'key' => self::PREFIX . 'compress', 'type' => 'toggle', 'label' => __( 'Compress uploads', 'emcp-tools' ), 'help' => __( 'Re-encode generated image sizes at the quality below.', 'emcp-tools' ) ),
 			array( 'key' => self::PREFIX . 'webp', 'type' => 'toggle', 'label' => __( 'Create WebP copies', 'emcp-tools' ) ),
-			array( 'key' => self::PREFIX . 'webp_serve', 'type' => 'toggle', 'label' => __( 'Serve WebP on the site', 'emcp-tools' ), 'parent' => self::PREFIX . 'webp', 'help' => __( 'MCP and REST always get WebP; this also serves it to visitors whose browser supports it.', 'emcp-tools' ) ),
+			array( 'key' => self::PREFIX . 'webp_serve', 'type' => 'toggle', 'label' => __( 'Serve WebP on the site', 'emcp-tools' ), 'parent' => self::PREFIX . 'webp', 'help' => __( 'Every visitor gets WebP where a WebP copy exists, so cached pages look the same for everyone. MCP and REST always get WebP.', 'emcp-tools' ) ),
 			array( 'key' => self::PREFIX . 'quality', 'type' => 'range', 'label' => __( 'Quality', 'emcp-tools' ), 'min' => 1, 'max' => 100 ),
+			array( 'key' => self::PREFIX . 'webp_quality', 'type' => 'number', 'label' => __( 'WebP quality', 'emcp-tools' ), 'parent' => self::PREFIX . 'webp', 'min' => 0, 'max' => 100, 'help' => __( '0 is automatic: 15 below Quality, where WebP looks the same as the JPEG and is smaller.', 'emcp-tools' ) ),
 			array( 'key' => self::PREFIX . 'max_dimension', 'type' => 'number', 'label' => __( 'Largest side', 'emcp-tools' ), 'min' => 0, 'unit' => 'px', 'help' => __( '0 keeps the original size.', 'emcp-tools' ) ),
 			array( 'key' => self::PREFIX . 'keep_originals', 'type' => 'toggle', 'label' => __( 'Keep originals', 'emcp-tools' ), 'help' => __( 'Back up files before changing them, so they can be restored.', 'emcp-tools' ) ),
 		);
@@ -137,7 +145,7 @@ class EMCP_Tools_Image_Optimization_Module extends EMCP_Tools_Module {
 	/**
 	 * Resolve the current settings into a typed array for the optimizer.
 	 *
-	 * @return array{compress:bool,webp:bool,webp_serve:bool,quality:int,max_dimension:int,keep_originals:bool}
+	 * @return array{compress:bool,webp:bool,webp_serve:bool,quality:int,webp_quality:int,max_dimension:int,keep_originals:bool}
 	 */
 	public function current_settings(): array {
 		return array(
@@ -145,6 +153,7 @@ class EMCP_Tools_Image_Optimization_Module extends EMCP_Tools_Module {
 			'webp'           => '1' === (string) get_option( self::PREFIX . 'webp', '1' ),
 			'webp_serve'     => '1' === (string) get_option( self::PREFIX . 'webp_serve', '1' ),
 			'quality'        => EMCP_Tools_Image_Optimizer::clamp_quality( (int) get_option( self::PREFIX . 'quality', 60 ) ),
+			'webp_quality'   => max( 0, min( 100, (int) get_option( self::PREFIX . 'webp_quality', 0 ) ) ),
 			'max_dimension'  => max( 0, (int) get_option( self::PREFIX . 'max_dimension', 0 ) ),
 			'keep_originals' => '1' === (string) get_option( self::PREFIX . 'keep_originals', '1' ),
 		);
@@ -168,6 +177,46 @@ class EMCP_Tools_Image_Optimization_Module extends EMCP_Tools_Module {
 			// rewrite is gated by the separate "serve on frontend" toggle.
 			( new EMCP_Tools_Webp_Rewriter( $settings['webp_serve'] ) )->register();
 		}
+	}
+
+	/**
+	 * Elementor keeps the image URLs a page was first rendered with: widget HTML
+	 * in its element cache, background images in its generated CSS files. So
+	 * whenever the module starts or stops serving WebP, flush both, or visitors
+	 * keep the old URLs. register() runs only while the module is on, so the
+	 * bootstrap wires this unconditionally.
+	 */
+	public static function watch_changes(): void {
+		add_action( 'update_option_' . EMCP_Tools_Module::OPTION_ACTIVE, array( __CLASS__, 'on_modules_changed' ), 10, 2 );
+		foreach ( array( 'webp', 'webp_serve' ) as $key ) {
+			add_action( 'add_option_' . self::PREFIX . $key, array( __CLASS__, 'flush_elementor_cache' ), 10, 0 );
+			add_action( 'update_option_' . self::PREFIX . $key, array( __CLASS__, 'flush_elementor_cache' ), 10, 0 );
+		}
+	}
+
+	/**
+	 * @param mixed $old Previous active module ids.
+	 * @param mixed $now New active module ids.
+	 */
+	public static function on_modules_changed( $old, $now ): void {
+		$was = in_array( self::ID, is_array( $old ) ? $old : array(), true );
+		$is  = in_array( self::ID, is_array( $now ) ? $now : array(), true );
+		if ( $was !== $is ) {
+			self::flush_elementor_cache();
+		}
+	}
+
+	/**
+	 * Drop Elementor's rendered-element cache and generated CSS so pages are
+	 * rendered again with the current image URLs.
+	 */
+	public static function flush_elementor_cache(): void {
+		if ( class_exists( '\Elementor\Plugin' ) && isset( \Elementor\Plugin::$instance->files_manager ) ) {
+			// Deletes the CSS files and, on current Elementor, the element cache.
+			\Elementor\Plugin::$instance->files_manager->clear_cache();
+		}
+		// Older Elementor versions leave the element cache in place.
+		delete_post_meta_by_key( EMCP_Tools_Data::ELEMENT_CACHE_META );
 	}
 
 	/** Render the card knobs. Delegates to the shared view partial. */

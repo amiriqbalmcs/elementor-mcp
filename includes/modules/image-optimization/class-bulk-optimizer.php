@@ -112,6 +112,8 @@ class EMCP_Tools_Bulk_Optimizer {
 		$progress = self::progress( $total, $done );
 		if ( $progress['done'] ) {
 			update_option( self::OPTION_CURSOR, 0 );
+			// Pages Elementor cached before the run still point at the JPEGs.
+			EMCP_Tools_Image_Optimization_Module::flush_elementor_cache();
 		}
 		return $progress;
 	}
@@ -142,6 +144,8 @@ class EMCP_Tools_Bulk_Optimizer {
 			}
 		}
 		update_option( self::OPTION_CURSOR, 0 );
+		// Cached pages may still point at the WebP copies just deleted.
+		EMCP_Tools_Image_Optimization_Module::flush_elementor_cache();
 		return array( 'restored' => $restored );
 	}
 

@@ -42,6 +42,7 @@ class EMCP_Tools_Bootstrap {
 		'emcp_tools_static_deny_verified',
 		'emcp_tools_module_image_optimization_webp_serve',
 		'emcp_tools_module_image_optimization_max_dimension',
+		'emcp_tools_module_image_optimization_webp_quality',
 		'emcp_tools_module_gsap_contexts',
 		'emcp_tools_module_gsap_plugins',
 		'emcp_tools_hardening',
@@ -695,6 +696,7 @@ class EMCP_Tools_Bootstrap {
 		// active ones on `init` (after registration, before most feature hooks).
 		$emcp_modules = EMCP_Tools_Modules_Registry::instance();
 		$emcp_modules->register( new EMCP_Tools_Image_Optimization_Module() );
+		EMCP_Tools_Image_Optimization_Module::watch_changes();
 		$emcp_modules->register( new EMCP_Tools_Prompts_Module() );
 		$emcp_modules->register( new EMCP_Tools_Brand_Kits_Module() );
 		$emcp_modules->register( new EMCP_Tools_Templates_Module() );
