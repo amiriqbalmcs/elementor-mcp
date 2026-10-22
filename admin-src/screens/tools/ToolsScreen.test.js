@@ -138,6 +138,29 @@ describe( 'ToolsScreen', () => {
 		).not.toBeInTheDocument();
 	} );
 
+	it( 'saves the turn-on-new-tools switch', async () => {
+		apiFetch.mockResolvedValue( {
+			...data,
+			autoEnable: true,
+			ignored: [],
+		} );
+		mount();
+		await userEvent.click(
+			screen.getByRole( 'switch', {
+				name: 'Turn on new tools after updates',
+			} )
+		);
+		await userEvent.click(
+			screen.getByRole( 'button', { name: 'Save changes' } )
+		);
+		expect( apiFetch ).toHaveBeenCalledWith(
+			expect.objectContaining( {
+				path: '/emcp-tools/v1/admin/tools',
+				data: { enable: [], disable: [], auto_enable_new_tools: true },
+			} )
+		);
+	} );
+
 	it( 'keeps a toggle flipped during an in-flight save dirty', async () => {
 		let resolve;
 		apiFetch.mockImplementation(

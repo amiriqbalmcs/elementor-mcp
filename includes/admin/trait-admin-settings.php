@@ -28,7 +28,12 @@ trait EMCP_Tools_Admin_Settings_Trait {
 			$existing = array();
 		}
 
-		$changes  = $this->default_disabled_changes( $applied );
+		$changes = $this->default_disabled_changes( $applied );
+		// An upgrade on a site that asked for new tools to stay on adds nothing;
+		// stale slugs are still stripped.
+		if ( $applied > 0 && '1' === (string) get_option( self::OPTION_AUTO_ENABLE_NEW_TOOLS, '0' ) ) {
+			$changes['add'] = array();
+		}
 		$existing = array_values( array_diff( $existing, $changes['strip'] ) );
 		$merged   = array_values( array_unique( array_merge( $existing, $changes['add'] ) ) );
 		update_option( self::OPTION_DISABLED_TOOLS, $merged );

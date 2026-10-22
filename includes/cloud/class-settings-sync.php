@@ -67,6 +67,7 @@ class EMCP_Tools_Settings_Sync {
 			'elementor_mcp_disabled_tools',         // legacy grid key
 			'emcp_tools_active_modules',            // module on/off
 			'emcp_tools_dispatcher_mode',           // compact tool mode
+			'emcp_tools_auto_enable_new_tools',     // leave new tools on after updates
 			'emcp_tools_strict_schemas',            // behavior pref
 			'emcp_tools_content_mirror_enabled',    // content mirror opt-in
 			'emcp_tools_site_context',              // extra instructions (free-text context)

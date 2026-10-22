@@ -400,6 +400,15 @@ class EMCP_Tools_Admin {
 	const DEFAULTS_VERSION = 65;
 
 	/**
+	 * '1' when updates should leave new tools on: the defaults seeding then
+	 * records each new version without adding its tools to the disabled list.
+	 * A fresh install still gets the conservative defaults.
+	 *
+	 * @since 3.21.0
+	 */
+	const OPTION_AUTO_ENABLE_NEW_TOOLS = 'emcp_tools_auto_enable_new_tools';
+
+	/**
 	 * Themer PHP-template tool slugs. The whole feature is gated behind a master
 	 * switch (off by default), and even once enabled these 5 tools ship
 	 * disabled-by-default like the PHP Snippets — the admin opts in on the Tools tab.

@@ -27,6 +27,7 @@ final class EMCP_Tools_Admin_REST_Tools extends EMCP_Tools_Admin_REST_Controller
 						'disable'         => array( 'type' => 'array', 'items' => array( 'type' => 'string' ), 'default' => array() ),
 						'dispatcher_mode' => array( 'type' => 'boolean' ),
 						'themer_php'      => array( 'type' => 'boolean' ),
+						'auto_enable_new_tools' => array( 'type' => 'boolean' ),
 					),
 				),
 			)
@@ -80,7 +81,10 @@ final class EMCP_Tools_Admin_REST_Tools extends EMCP_Tools_Admin_REST_Controller
 		if ( null !== $request->get_param( 'dispatcher_mode' ) ) {
 			update_option( 'emcp_tools_dispatcher_mode', rest_sanitize_boolean( $request->get_param( 'dispatcher_mode' ) ) ? '1' : '0' );
 		}
-		if ( null !== $request->get_param( 'themer_php' ) && class_exists( 'EMCP_Tools_Themer_Module' ) && EMCP_Tools_Themer_Module::is_enabled() ) {
+		if ( null !== $request->get_param( 'auto_enable_new_tools' ) ) {
+			update_option( EMCP_Tools_Admin::OPTION_AUTO_ENABLE_NEW_TOOLS, rest_sanitize_boolean( $request->get_param( 'auto_enable_new_tools' ) ) ? '1' : '0' );
+		}
+		if ( null !== $request->get_param( 'themer_php' ) &&class_exists( 'EMCP_Tools_Themer_Module' ) && EMCP_Tools_Themer_Module::is_enabled() ) {
 			update_option( 'emcp_tools_themer_php_enabled', rest_sanitize_boolean( $request->get_param( 'themer_php' ) ) ? '1' : '0' );
 		}
 		delete_transient( 'emcp_tools_nav_counts' );

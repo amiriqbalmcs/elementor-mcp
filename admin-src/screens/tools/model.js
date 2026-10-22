@@ -1,7 +1,7 @@
 /**
  * Pure helpers for the Tools screen (spec 8.3). Form values are flat so
- * useSettingsForm can diff them: `tool:<slug>` booleans plus `dispatcher`
- * and `themerPhp`.
+ * useSettingsForm can diff them: `tool:<slug>` booleans plus `dispatcher`,
+ * `autoEnable` and `themerPhp`.
  */
 const PREFIX = 'tool:';
 
@@ -10,6 +10,7 @@ export const key = ( slug ) => PREFIX + slug;
 export function valuesFromPayload( data ) {
 	const values = {
 		dispatcher: !! data.dispatcher,
+		autoEnable: !! data.autoEnable,
 		themerPhp: data.themerPhp ?? null,
 	};
 	Object.entries( data.enabled || {} ).forEach( ( [ slug, on ] ) => {
@@ -25,6 +26,8 @@ export function payloadFromDiff( diff ) {
 			( v ? out.enable : out.disable ).push( k.slice( PREFIX.length ) );
 		} else if ( 'dispatcher' === k ) {
 			out.dispatcher_mode = !! v;
+		} else if ( 'autoEnable' === k ) {
+			out.auto_enable_new_tools = !! v;
 		} else if ( 'themerPhp' === k && null !== v ) {
 			out.themer_php = !! v;
 		}

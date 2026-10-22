@@ -167,6 +167,7 @@ final class EMCP_Tools_Admin_Tools_Data {
 			'categories'      => $categories,
 			'enabled'         => $enabled,
 			'dispatcher'      => '1' === (string) get_option( 'emcp_tools_dispatcher_mode', '0' ),
+			'autoEnable'      => '1' === (string) get_option( EMCP_Tools_Admin::OPTION_AUTO_ENABLE_NEW_TOOLS, '0' ),
 			'themerPhp'       => $themer_on ? '1' === (string) get_option( 'emcp_tools_themer_php_enabled', '0' ) : null,
 			'defaults'        => array_values( array_intersect( $this->admin->default_disabled_tool_slugs(), array_keys( $enabled ) ) ),
 			'elementorActive' => $elementor,

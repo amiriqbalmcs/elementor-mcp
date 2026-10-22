@@ -78,6 +78,18 @@ describe( 'tools model', () => {
 		} );
 	} );
 
+	it( 'carries the auto-enable switch both ways', () => {
+		expect(
+			valuesFromPayload( { ...payload, autoEnable: true } ).autoEnable
+		).toBe( true );
+		expect( valuesFromPayload( payload ).autoEnable ).toBe( false );
+		expect( payloadFromDiff( { autoEnable: true } ) ).toEqual( {
+			enable: [],
+			disable: [],
+			auto_enable_new_tools: true,
+		} );
+	} );
+
 	it( 'filters by tab, search, risk and status together', () => {
 		const values = valuesFromPayload( payload );
 		const base = {

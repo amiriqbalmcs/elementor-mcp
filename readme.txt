@@ -221,13 +221,14 @@ EMCP Tools works on your own site. It contacts the services below only in the si
 
 = 3.21.0 =
 
-Incident-response tools for a hacked site, contributed by @Mrshahidali420, binary file writes, and fixes for subdirectory multisite OAuth, backups, the connection steps and five user reports.
+Incident-response tools for a hacked site, contributed by @Mrshahidali420, a switch to keep new tools on after updates, binary file writes, and fixes for subdirectory multisite OAuth, backups, the connection steps and five user reports.
 
 * New: scan-security has a compromise audit: hidden twin-folder back doors, back-dated files, search-engine cloaking, publicly downloadable backups, suspicious must-use plugins and orphaned scheduled tasks, plus three new malware rules.
 * New: quarantine-file, restore-quarantined-file and list-quarantine move a suspicious file out of the site without losing it, renamed so it cannot run, and back again from History.
 * New: harden-site and get-hardening-status switch off XML-RPC, hide the WordPress version, block user enumeration and hide PHP errors, each undoable.
 * New: search-access-log finds the request behind a hack in the web server access logs.
 * New: list-processes and kill-process find and stop a watcher process that keeps rewriting files (Linux; server processes are never stopped).
+* New: "Turn on new tools after updates" on the Tools screen: tools that updates add switched off arrive switched on instead.
 * New: write-file writes binary files (images, fonts, ZIP) with encoding "base64", up to 5 MB.
 * The tools that change the site, read server logs or list processes ship switched off.
 * Fixed: Atomic headings, paragraphs and buttons rendered empty on Elementor 4.3. The tools now write the text format the installed Elementor expects, and any write to a page converts text stored in the old format.

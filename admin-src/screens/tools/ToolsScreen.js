@@ -398,6 +398,33 @@ export function ToolsScreen( { data: initialData } ) {
 						</div>
 					</div>
 				</Card>
+				<Card>
+					<div className="eui-tools__mode">
+						<Toggle
+							checked={ values.autoEnable }
+							onChange={ ( v ) => setValue( 'autoEnable', v ) }
+							label={ __(
+								'Turn on new tools after updates',
+								'emcp-tools'
+							) }
+							hideLabel
+						/>
+						<div>
+							<p className="eui-tools__mode-title">
+								{ __(
+									'Turn on new tools after updates',
+									'emcp-tools'
+								) }
+							</p>
+							<p className="eui-tools__mode-desc">
+								{ __(
+									'Updates normally add powerful new tools switched off, such as file, database and plugin writes. With this on, they arrive switched on. Tools you turned off stay off.',
+									'emcp-tools'
+								) }
+							</p>
+						</div>
+					</div>
+				</Card>
 				{ null !== values.themerPhp && (
 					<Card>
 						<div className="eui-tools__mode">
