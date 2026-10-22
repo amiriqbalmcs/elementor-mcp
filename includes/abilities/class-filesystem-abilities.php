@@ -295,15 +295,20 @@ class EMCP_Tools_Filesystem_Abilities {
 			'emcp-tools/write-file',
 			array(
 				'label'               => __( 'Write File', 'emcp-tools' ),
-				'description'         => __( 'Create or overwrite a file inside the WordPress install. Backs up an existing file first. Refuses wp-config.php/.htaccess. Disabled by default; requires file-editing to be allowed.', 'emcp-tools' ),
+				'description'         => __( 'Create or overwrite a file inside the WordPress install. Backs up an existing file first. Refuses wp-config.php/.htaccess. For binary files (images, fonts, ZIP), pass the bytes base64-encoded with encoding "base64". Disabled by default; requires file-editing to be allowed.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_write_file' ),
 				'permission_callback' => array( $this, 'check_permission' ),
 				'input_schema'        => array(
 					'type'       => 'object',
 					'properties' => array(
-						'path'    => array( 'type' => 'string' ),
-						'content' => array( 'type' => 'string' ),
+						'path'     => array( 'type' => 'string' ),
+						'content'  => array( 'type' => 'string' ),
+						'encoding' => array(
+							'type'        => 'string',
+							'enum'        => array( 'utf8', 'base64' ),
+							'description' => __( 'How content is encoded. "utf8" (default) writes it as text; "base64" decodes it and writes the raw bytes.', 'emcp-tools' ),
+						),
 					),
 					'required'   => array( 'path', 'content' ),
 				),
@@ -329,7 +334,20 @@ class EMCP_Tools_Filesystem_Abilities {
 		if ( EMCP_Tools_Filesystem_Guard::is_protected( $abs ) ) {
 			return new \WP_Error( 'protected', __( 'This file is protected from writes.', 'emcp-tools' ) );
 		}
-		$content = (string) ( $input['content'] ?? '' );
+		$content  = (string) ( $input['content'] ?? '' );
+		$encoding = (string) ( $input['encoding'] ?? 'utf8' );
+		if ( ! in_array( $encoding, array( 'utf8', 'base64' ), true ) ) {
+			return new \WP_Error( 'invalid_encoding', __( 'encoding must be "utf8" or "base64".', 'emcp-tools' ) );
+		}
+		if ( 'base64' === $encoding ) {
+			// Strict decode: anything outside the base64 alphabet (other than the
+			// whitespace agents wrap long payloads with) is refused, never skipped.
+			$content = base64_decode( preg_replace( '/\s+/', '', $content ), true );
+			if ( false === $content ) {
+				return new \WP_Error( 'invalid_base64', __( 'Content is not valid base64.', 'emcp-tools' ) );
+			}
+		}
+		// The size limit applies to the bytes written, after decoding.
 		if ( strlen( $content ) > EMCP_Tools_Filesystem_Guard::MAX_WRITE_BYTES ) {
 			return new \WP_Error( 'too_large', __( 'Content exceeds the maximum writable size.', 'emcp-tools' ) );
 		}
