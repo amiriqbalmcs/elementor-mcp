@@ -849,7 +849,7 @@ class EMCP_Tools_Data {
 	 * sent replaces the stored one, a null prop removes it, props not sent stay.
 	 * A variant whose breakpoint and state are new is appended.
 	 *
-	 * @since 3.20.1
+	 * @since 3.21.0
 	 *
 	 * @param array $existing Stored styles map.
 	 * @param array $incoming Styles to write.
@@ -881,7 +881,7 @@ class EMCP_Tools_Data {
 	/**
 	 * Merges incoming style variants into the stored list.
 	 *
-	 * @since 3.20.1
+	 * @since 3.21.0
 	 *
 	 * @param array $existing Stored variants.
 	 * @param array $incoming Variants to write.
@@ -932,7 +932,7 @@ class EMCP_Tools_Data {
 	/**
 	 * A variant's identity: its breakpoint and state (null and absent are the same).
 	 *
-	 * @since 3.20.1
+	 * @since 3.21.0
 	 *
 	 * @param array $variant Variant.
 	 */

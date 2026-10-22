@@ -336,7 +336,7 @@ class EMCP_Tools_Atomic_Props {
 	 * Elementor declares: `escaped-html` on 4.3+ (e-heading title, e-paragraph
 	 * paragraph, e-button text), `html-v3` before that (#166).
 	 *
-	 * @since 3.20.1
+	 * @since 3.21.0
 	 *
 	 * @param string $widget_type Atomic widget type, e.g. 'e-paragraph'.
 	 * @param string $prop        Prop name.
@@ -350,7 +350,7 @@ class EMCP_Tools_Atomic_Props {
 	/**
 	 * rich_text() against a supplied prop schema.
 	 *
-	 * @since 3.20.1
+	 * @since 3.21.0
 	 *
 	 * @param array  $schema Map of prop name => Elementor prop type.
 	 * @param string $prop   Prop name.
@@ -814,7 +814,7 @@ class EMCP_Tools_Atomic_Props {
 	 * The markup inside a rich-text envelope (`html-v3`, `html-v2`, `html`,
 	 * `escaped-html`), or null for anything else.
 	 *
-	 * @since 3.20.1
+	 * @since 3.21.0
 	 *
 	 * @param mixed $value A prop value.
 	 * @return string|null

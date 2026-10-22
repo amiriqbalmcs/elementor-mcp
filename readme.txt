@@ -221,7 +221,7 @@ EMCP Tools works on your own site. It contacts the services below only in the si
 
 = 3.21.0 =
 
-Incident-response tools for a hacked site, contributed by @Mrshahidali420.
+Incident-response tools for a hacked site, contributed by @Mrshahidali420, and five fixes from user reports.
 
 * New: scan-security has a compromise audit: hidden twin-folder back doors, back-dated files, search-engine cloaking, publicly downloadable backups, suspicious must-use plugins and orphaned scheduled tasks, plus three new malware rules.
 * New: quarantine-file, restore-quarantined-file and list-quarantine move a suspicious file out of the site without losing it, renamed so it cannot run, and back again from History.
@@ -229,11 +229,6 @@ Incident-response tools for a hacked site, contributed by @Mrshahidali420.
 * New: search-access-log finds the request behind a hack in the web server access logs.
 * New: list-processes and kill-process find and stop a watcher process that keeps rewriting files (Linux; server processes are never stopped).
 * The tools that change the site, read server logs or list processes ship switched off.
-
-= 3.20.1 =
-
-Five fixes from user reports.
-
 * Fixed: Atomic headings, paragraphs and buttons rendered empty on Elementor 4.3. The tools now write the text format the installed Elementor expects, and any write to a page converts text stored in the old format.
 * Fixed: A styles write through update-element or batch-update replaced the whole variant. Props now merge one by one; null removes a prop.
 * Fixed: An Elementor write to a page open in your own editor with unsaved changes is now refused, as it already was for other users, so Force Save can no longer throw it away. Retry with ignore_open_editor: true if the editor was closed without saving.

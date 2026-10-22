@@ -81,7 +81,7 @@ class EMCP_Tools_Schema_Compat {
 	 * not read-only and take a `post_id`. A call passing `ignore_open_editor: true`
 	 * runs with EMCP_Tools_Elementor_Editor_Sync's open-editor check switched off.
 	 *
-	 * @since 3.20.1
+	 * @since 3.21.0
 	 *
 	 * @param array $args Ability arguments.
 	 * @return array
