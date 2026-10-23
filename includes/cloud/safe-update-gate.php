@@ -17,10 +17,14 @@ try {
 	if ( 'GET' === ( $_SERVER['REQUEST_METHOD'] ?? '' ) && in_array( $emcp_update_path, $emcp_update_paths, true ) && preg_match( '/^[a-f0-9-]{36}$/D', $emcp_update_probe ) && preg_match( '/^Bearer ([a-f0-9]{64})$/D', $emcp_update_auth, $emcp_update_match ) && hash_equals( $emcp_update_state['token_hash'], hash( 'sha256', $emcp_update_match[1] ) ) ) {
 		if ( ! defined( 'DISABLE_WP_CRON' ) ) { define( 'DISABLE_WP_CRON', true ); }
 		if ( ! defined( 'DONOTCACHEPAGE' ) ) { define( 'DONOTCACHEPAGE', true ); }
+		if ( ! defined( 'DONOTCACHEDB' ) ) { define( 'DONOTCACHEDB', true ); }
+		if ( ! defined( 'DONOTCACHEOBJECT' ) ) { define( 'DONOTCACHEOBJECT', true ); }
 		ob_start();
 		register_shutdown_function( static function () use ( $emcp_update_probe ) {
 			$error = error_get_last();
-			if ( ! $error || ! in_array( $error['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR ), true ) ) {
+			// A cache can exit before WordPress loads and serve a healthy-looking
+			// stale page. Only acknowledge a probe that reached a full bootstrap.
+			if ( function_exists( 'did_action' ) && did_action( 'wp_loaded' ) && ( ! $error || ! in_array( $error['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR ), true ) ) ) {
 				header( 'X-EMCP-Update-Probe-Result: ' . $emcp_update_probe );
 				header( 'Cache-Control: no-store' );
 			}

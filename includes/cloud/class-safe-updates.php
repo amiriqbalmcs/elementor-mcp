@@ -56,25 +56,34 @@ class EMCP_Tools_Safe_Updates {
 		if ( ! extension_loaded( 'mysqli' ) ) { $codes[] = 'mysqli_required'; }
 		global $wpdb;
 		require_once __DIR__ . '/safe-update-runtime.php';
-		$tables = $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $wpdb->prefix ) . '%' ) );
-		// Plugin history tables can share these suffixes. Confirm the core schema
-		// before treating a matching pair as a second WordPress installation.
+		$database_bytes = null; $file_bytes = null;
 		try {
-			if ( ! $tables || $wpdb->last_error ) { throw new RuntimeException( 'database_schema_unavailable' ); }
-			if ( EMCP_Update_Runtime::other_installs( $tables, $wpdb->prefix, static function ( $table ) use ( $wpdb ) {
-				$columns = $wpdb->get_col( $wpdb->prepare( 'SHOW COLUMNS FROM %i', $table ), 0 );
-				return $wpdb->last_error ? null : $columns;
-			} ) ) { $codes[] = 'shared_database_prefix'; }
-		} catch ( Throwable $error ) { $codes[] = 'database_schema_unavailable'; }
+			if ( extension_loaded( 'mysqli' ) ) {
+				$database_bytes = EMCP_Update_Runtime::preflight_database( array( 'host' => DB_HOST, 'user' => DB_USER, 'password' => DB_PASSWORD, 'name' => DB_NAME, 'prefix' => $wpdb->prefix ) );
+			}
+		} catch ( Throwable $error ) {
+			$codes[] = $error instanceof RuntimeException && preg_match( '/^[a-z_]+$/D', $error->getMessage() ) ? $error->getMessage() : 'database_schema_unavailable';
+		}
 		try {
-			EMCP_Update_Runtime::preflight_files( ABSPATH );
+			$file_bytes = EMCP_Update_Runtime::preflight_files( ABSPATH );
 		} catch ( RuntimeException $error ) {
 			$codes[] = preg_match( '/^[a-z_]+$/D', $error->getMessage() ) ? $error->getMessage() : 'files_not_supported';
+		}
+		if ( null !== $database_bytes && null !== $file_bytes ) {
+			try { EMCP_Update_Runtime::check_space( ABSPATH, $database_bytes + $file_bytes ); }
+			catch ( RuntimeException $error ) { $codes[] = $error->getMessage(); }
 		}
 		// MU plugins run after the wp-config gate and are covered by the file snapshot.
 		// Recovery never boots WordPress, so even a fatal in an MU plugin is recoverable.
 		if ( defined( 'WPMU_PLUGIN_DIR' ) && wp_normalize_path( WPMU_PLUGIN_DIR ) !== wp_normalize_path( ABSPATH . 'wp-content/mu-plugins' ) ) { $codes[] = 'custom_mu_plugin_path'; }
-		foreach ( array_keys( get_dropins() ) as $dropin ) { $codes[] = 'dropin_requires_host_recovery:' . $dropin; }
+		// Recognized WP Rocket/10Web default page-cache layouts are covered by
+		// the snapshot and standalone purge. Unknown/custom layouts and database
+		// or object-cache drop-ins retain their hosting-level recovery requirement.
+		foreach ( array_keys( get_dropins() ) as $dropin ) {
+			if ( 'advanced-cache.php' !== $dropin ) { $codes[] = 'dropin_requires_host_recovery:' . $dropin; }
+		}
+		try { EMCP_Update_Runtime::page_caches( ABSPATH ); }
+		catch ( RuntimeException $error ) { $codes[] = $error->getMessage(); }
 		if ( wp_using_ext_object_cache() ) { $codes[] = 'external_object_cache_requires_host_recovery'; }
 		if ( defined( 'DISALLOW_FILE_MODS' ) && DISALLOW_FILE_MODS ) { $codes[] = 'file_modifications_disabled'; }
 		if ( defined( 'FS_METHOD' ) && 'direct' !== FS_METHOD ) { $codes[] = 'direct_filesystem_required'; }

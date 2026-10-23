@@ -10,6 +10,9 @@ class EMCP_Update_Runtime {
 	public static $tick_rows = 5000;
 	public static $tick_seconds = 5;
 	public static $scan_entries = 2000;
+	public static $inspection_seconds = 3;
+	const CHUNK_BYTES = 1048576;
+	const ROW_BYTES = 8388608;
 
 	/**
 	 * The line prepended to wp-config.php for the window. When the job folder is missing
@@ -140,8 +143,7 @@ class EMCP_Update_Runtime {
 			if ( 'rollback' === $action ) {
 				$s['code'] = $s['code'] ?? 'health_failed_or_cancelled';
 				if ( empty( $s['snapshot_ready'] ) ) { self::release( $s, 'failed' ); return; }
-				$s['phase'] = 'restoring'; $s['restore_step'] = 0; $s['restore_db'] = 0;
-				unset( $s['restore_pruned'], $s['restore_swept'], $s['restore_created'] );
+				self::begin_restore( $s );
 				self::save( $s ); return;
 			}
 			if ( 'release' === $action && 'verify_restore' === $s['phase'] ) { self::release( $s, 'rolled_back' ); return; }
@@ -154,7 +156,7 @@ class EMCP_Update_Runtime {
 					$s['previous_snapshot'] = $s['snapshot'] ?? null;
 					$s['group']++;
 					if ( $s['group'] >= count( $s['groups'] ) ) { self::release( $s, 'completed' ); return; }
-					unset( $s['snapshot_ready'], $s['snapshot'], $s['files'], $s['tables'], $s['file_index'], $s['table_index'], $s['item_index'], $s['restore_pruned'], $s['scan'], $s['snapshot_bytes_total'], $s['snapshot_bytes_done'], $s['files_reused'] );
+					unset( $s['snapshot_ready'], $s['snapshot'], $s['files'], $s['tables'], $s['file_index'], $s['table_index'], $s['table_snapshot'], $s['table_hashes'], $s['restore_validation'], $s['restore_validated'], $s['restore_reset'], $s['item_index'], $s['restore_pruned'], $s['scan'], $s['snapshot_bytes_total'], $s['snapshot_bytes_done'], $s['files_reused'] );
 					$s['phase'] = 'snapshot';
 				}
 				self::save( $s ); return;
@@ -163,16 +165,24 @@ class EMCP_Update_Runtime {
 			switch ( $s['phase'] ) {
 				case 'prepared':
 					$config = self::read( $s['dir'] . '/original-config.php' );
-					if ( ! hash_equals( $s['config_hash'], hash_file( 'sha256', $s['root'] . 'wp-config.php' ) ) ) { throw new RuntimeException( 'config_changed' ); }
-					self::atomic( $s['root'] . 'wp-config.php', self::gate_line( $s['dir'] ) . $config );
+					$gated = self::gate_line( $s['dir'] ) . $config;
+					$current = file_get_contents( $s['root'] . 'wp-config.php' );
+					if ( $current !== $gated && ! hash_equals( $s['config_hash'], hash( 'sha256', $current ) ) ) { throw new RuntimeException( 'config_changed' ); }
+					if ( $current !== $gated ) { self::atomic( $s['root'] . 'wp-config.php', $gated ); }
+					// Apache can serve these HTML files without ever reaching wp-config.
+					// Install the PHP gate first, then remove static cache hits before baseline.
+					self::page_caches( $s['root'], true );
 					$s['phase'] = 'baseline'; break;
 				case 'draining':
-					if ( time() >= $s['drain_until'] ) { $s['phase'] = 'snapshot'; }
+					if ( time() >= $s['drain_until'] ) {
+						// An old pre-gate request may have finished writing a cache during drain.
+						self::page_caches( $s['root'], true ); $s['phase'] = 'snapshot';
+					}
 					break;
 				case 'snapshot': self::snapshot( $s ); break;
 				case 'applying': self::apply( $s ); break;
 				case 'updating': // Previous PHP process stopped with an uncertain write. Never replay it.
-					$s['code'] = 'update_interrupted'; $s['phase'] = 'restoring'; $s['restore_step'] = 0; $s['restore_db'] = 0; break;
+					$s['code'] = 'update_interrupted'; self::begin_restore( $s ); break;
 				case 'restoring': self::restore( $s ); break;
 			}
 			self::save( $s );
@@ -180,15 +190,32 @@ class EMCP_Update_Runtime {
 			$s['code'] = preg_match( '/^[a-z_]+$/D', $error->getMessage() ) ? $error->getMessage() : 'operation_failed';
 			$s['diagnostic'] = array( 'class' => get_class( $error ), 'file' => basename( $error->getFile() ), 'line' => $error->getLine(), 'errno' => (int) $error->getCode() );
 			if ( 'restoring' === $s['phase'] ) { $s['phase'] = 'manual_recovery'; self::save( $s ); }
-			elseif ( ! empty( $s['snapshot_ready'] ) ) { $s['phase'] = 'restoring'; $s['restore_step'] = 0; $s['restore_db'] = 0; self::save( $s ); }
+			elseif ( ! empty( $s['snapshot_ready'] ) ) { self::begin_restore( $s ); self::save( $s ); }
 			else { self::release( $s, 'failed' ); }
 		}
+	}
+	private static function begin_restore( &$s ) {
+		$s['phase'] = 'restoring'; $s['restore_step'] = 0; $s['restore_db'] = 0;
+		unset( $s['restore_pruned'], $s['restore_swept'], $s['restore_created'], $s['restore_validation'], $s['restore_validated'], $s['restore_reset'] );
 	}
 
 	private static function release( &$s, $phase ) {
 		$config = self::read( $s['dir'] . '/original-config.php' );
 		$current = file_get_contents( $s['root'] . 'wp-config.php' );
 		if ( $current !== $config && $current !== self::gate_line( $s['dir'] ) . $config ) { $s['phase'] = 'manual_recovery'; $s['code'] = 'config_conflict'; self::save( $s ); return; }
+		// An interrupted later snapshot retains the already approved groups.
+		if ( in_array( $phase, array( 'completed', 'rolled_back' ), true ) || $s['group'] > 0 ) {
+			try { self::page_caches( $s['root'], true ); }
+			catch ( Throwable $error ) { $s['phase'] = 'manual_recovery'; $s['code'] = 'page_cache_cleanup_failed'; self::save( $s ); return; }
+		}
+		if ( isset( $s['recovery_probe'] ) ) {
+			try {
+				$db = self::db( $s );
+				try { self::recovery_privileges( $db, $s['db']['name'] ); self::remove_probe( $s, $db ); }
+				finally { $db->close(); }
+			}
+			catch ( Throwable $error ) { $s['phase'] = 'manual_recovery'; $s['code'] = 'database_probe_cleanup_failed'; self::save( $s ); return; }
+		}
 		self::atomic( $s['root'] . 'wp-config.php', $config );
 		$s['phase'] = $phase;
 		self::save( $s );
@@ -230,7 +257,7 @@ class EMCP_Update_Runtime {
 		foreach ( glob( $base . 'snapshot-*', GLOB_NOSORT ) ?: array() as $path ) { self::remove_tree( $path, $base ); }
 		foreach ( array( 'original-config.php', 'gate.php' ) as $file ) { if ( is_file( $base . $file ) ) { unlink( $base . $file ); } }
 		foreach ( $s['groups'] ?? array() as $g => $group ) { foreach ( $group as $i => $item ) { unset( $s['groups'][ $g ][ $i ]['_source'] ); } }
-		unset( $s['db'], $s['files'], $s['tables'], $s['table_hashes'], $s['previous_files'], $s['previous_snapshot'], $s['scan'] );
+		unset( $s['db'], $s['files'], $s['tables'], $s['table_hashes'], $s['table_snapshot'], $s['restore_validation'], $s['restore_validated'], $s['restore_reset'], $s['previous_files'], $s['previous_snapshot'], $s['scan'] );
 		$s['cleaned'] = true;
 		self::save( $s );
 	}
@@ -258,7 +285,15 @@ class EMCP_Update_Runtime {
 		$db = new mysqli( $host, $s['db']['user'], $s['db']['password'], $s['db']['name'], $port, $socket );
 		$db->set_charset( 'utf8mb4' );
 		$db->query( "SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'" );
+		$db->query( 'SET SESSION sql_quote_show_create = 1' );
+		self::show_invisible_keys( $db );
 		return $db;
+	}
+	/** A server may hide generated invisible keys from SHOW metadata by default. */
+	private static function show_invisible_keys( $db ) {
+		if ( false === stripos( $db->server_info, 'MariaDB' ) && $db->server_version >= 80030 ) {
+			$db->query( 'SET SESSION show_gipk_in_create_table_and_information_schema = ON' );
+		}
 	}
 	private static function ident( $name ) {
 		if ( ! preg_match( '/^[a-zA-Z0-9_]+$/D', $name ) ) { throw new RuntimeException( 'unsupported_table_name' ); }
@@ -281,6 +316,232 @@ class EMCP_Update_Runtime {
 		if ( ! $tables || count( $tables ) > 300 ) { throw new RuntimeException( 'unsupported_database' ); }
 		foreach ( $db->query( 'SHOW TRIGGERS' ) as $row ) { if ( str_starts_with( $row['Table'], $prefix ) ) { throw new RuntimeException( 'database_triggers_not_supported' ); } }
 		return $tables;
+	}
+	/** Same database checks at inspection and snapshot time. No readiness-time writes. */
+	public static function preflight_database( $connection ) {
+		$db = self::db( array( 'db' => $connection ) );
+		try {
+			$grants = self::effective_grants( $db );
+			self::recovery_privileges( $db, $connection['name'], '', $grants );
+			$deadline = microtime( true ) + self::$inspection_seconds;
+			$bytes = 0;
+			foreach ( self::tables( $db, $connection['prefix'] ) as $name ) {
+				$plan = self::table_plan( $db, $name, $deadline );
+				self::recovery_privileges( $db, $connection['name'], $plan['create'], $grants );
+				$bytes += $plan['bytes'];
+			}
+			return $bytes;
+		} finally { $db->close(); }
+	}
+	/** Snapshot reads alone cannot prove that the account can restore the database. */
+	private static function effective_grants( $db ) {
+		$read = static function ( $sql ) use ( $db ) { $rows = array(); foreach ( $db->query( $sql ) as $row ) { $rows[] = reset( $row ); } return $rows; };
+		$grants = $read( 'SHOW GRANTS' );
+		if ( false !== stripos( $db->server_info, 'MariaDB' ) ) {
+			if ( $db->server_version >= 100005 ) {
+				foreach ( $read( 'SELECT ROLE_NAME FROM information_schema.ENABLED_ROLES' ) as $role ) {
+					$grants = array_merge( $grants, $read( 'SHOW GRANTS FOR `' . str_replace( '`', '``', $role ) . '`' ) );
+				}
+			}
+		} elseif ( $db->server_version >= 80000 ) {
+			$roles = $read( 'SELECT CURRENT_ROLE()' )[0];
+			if ( 'NONE' !== $roles ) {
+				// CURRENT_ROLE is SQL account syntax, not an arbitrary SQL fragment.
+				$account = '`(?:``|[^`])+`@`(?:``|[^`])+`';
+				if ( ! preg_match( '/^' . $account . '(?:\s*,\s*' . $account . ')*$/D', $roles ) ) { throw new RuntimeException( 'database_roles_unavailable' ); }
+				$grants = $read( 'SHOW GRANTS FOR CURRENT_USER USING ' . $roles );
+			}
+		}
+		return $grants;
+	}
+	private static function recovery_privileges( $db, $name, $create = '', $grants = null ) {
+		$grants = $grants ?? self::effective_grants( $db );
+		self::require_privileges( $db, $name, array( 'SELECT', 'INSERT', 'CREATE', 'DROP', 'TRIGGER' ), $grants );
+		// SHOW CREATE emits one constraint per line. Qualifiers identify external parents.
+		preg_match_all( '/^\s*(?:CONSTRAINT `(?:``|[^`])+` )?FOREIGN KEY .* REFERENCES (?:(`(?:``|[^`])+`)\.)?`(?:``|[^`])+`/m', $create, $parents );
+		foreach ( array_unique( $parents[1] ) as $schema ) {
+			$parent = $schema ? str_replace( '``', '`', substr( $schema, 1, -1 ) ) : $name;
+			self::require_privileges( $db, $parent, array( 'REFERENCES' ), $grants );
+		}
+	}
+	private static function require_privileges( $db, $name, $required, $grants ) {
+		$granted = array(); $revoked = array(); $scoped = array(); $ranks = array();
+		$literal_scopes = null; $fold_case = false;
+		foreach ( $grants as $grant ) {
+			if ( ! preg_match( '/^(GRANT|REVOKE) (.+) ON (\*|`(?:``|[^`])+`)\.\* (?:TO|FROM) (.+?)(?: WITH GRANT OPTION)?$/i', $grant, $match ) ) { continue; }
+			$privileges = 'ALL PRIVILEGES' === strtoupper( $match[2] ) ? $required : explode( ', ', strtoupper( $match[2] ) );
+			$privileges = array_intersect( $required, $privileges );
+			// Even a row without a required privilege can mask a broader schema grant.
+			if ( ! $privileges && ( '*' === $match[3] || 'REVOKE' === strtoupper( $match[1] ) ) ) { continue; }
+			if ( '*' !== $match[3] && 'GRANT' === strtoupper( $match[1] ) && ! array_diff( $required, array_keys( $granted ) ) ) { continue; }
+			if ( '*' !== $match[3] ) {
+				$pattern = str_replace( '``', '`', substr( $match[3], 1, -1 ) );
+				if ( null === $literal_scopes ) {
+					$literal_scopes = false;
+					if ( false === stripos( $db->server_info, 'MariaDB' ) && $db->server_version >= 80016 ) {
+						$settings = $db->query( 'SELECT @@partial_revokes, @@lower_case_table_names' )->fetch_row();
+						$literal_scopes = (bool) (int) $settings[0]; $fold_case = 0 !== (int) $settings[1];
+					} else {
+						$fold_case = 0 !== (int) $db->query( 'SELECT @@lower_case_table_names' )->fetch_row()[0];
+					}
+				}
+				if ( $literal_scopes ) {
+					// partial_revokes makes even unescaped _ and % literal in schema grants.
+					$scope = strtr( $pattern, array( '\\_' => '_', '\\%' => '%' ) );
+					$matches = $fold_case ? 0 === strcasecmp( $name, $scope ) : $name === $scope;
+				} else {
+					// Connection collations must not make case-sensitive schemas (or accents) equal.
+					$sql = $fold_case ? 'SELECT BINARY LOWER(?) LIKE BINARY LOWER(?)' : 'SELECT BINARY ? LIKE BINARY ?';
+					$statement = $db->prepare( $sql ); $statement->bind_param( 'ss', $name, $pattern );
+					$statement->execute(); $statement->bind_result( $matches ); $statement->fetch(); $statement->close();
+				}
+				if ( ! $matches ) { continue; }
+				if ( 'GRANT' === strtoupper( $match[1] ) ) {
+					$key = $literal_scopes ? $scope : $pattern;
+					if ( $fold_case ) { $key = strtolower( $key ); }
+					$account = $match[4];
+					$scoped[ $account ][ $key ] = array_unique( array_merge( $scoped[ $account ][ $key ] ?? array(), $privileges ) );
+					$ranks[ $account ][ $key ] = $literal_scopes ? 128 : ( false === stripos( $db->server_info, 'MariaDB' ) ? self::grant_specificity( $pattern ) : 0 );
+					continue;
+				}
+			}
+			foreach ( $privileges as $privilege ) {
+				if ( 'REVOKE' === strtoupper( $match[1] ) ) { $revoked[ $privilege ] = true; }
+				else { $granted[ $privilege ] = true; }
+			}
+		}
+		// MySQL uses one matching schema row, not their union. SHOW GRANTS does not
+		// establish wildcard tie order: require rights present in every possible winner.
+		// Separate enabled roles remain additive, as do global grants above.
+		foreach ( $scoped as $account => $patterns ) {
+			$best = max( $ranks[ $account ] );
+			$common = $required;
+			foreach ( $patterns as $key => $privileges ) {
+				if ( $ranks[ $account ][ $key ] === $best ) { $common = array_intersect( $common, $privileges ); }
+			}
+			foreach ( $common as $privilege ) { $granted[ $privilege ] = true; }
+		}
+		if ( array_diff( $required, array_keys( array_diff_key( $granted, $revoked ) ) ) ) { throw new RuntimeException( 'database_recovery_privileges_required' ); }
+	}
+	/** MySQL orders exact scopes first, then the position of the first unescaped wildcard. */
+	private static function grant_specificity( $pattern ) {
+		if ( '%' === $pattern ) { return 1; }
+		for ( $i = 0, $length = strlen( $pattern ); $i < $length; $i++ ) {
+			if ( '\\' === $pattern[ $i ] && $i + 1 < $length ) { $i++; continue; }
+			if ( '%' === $pattern[ $i ] || '_' === $pattern[ $i ] ) { return min( $i + 2, 127 ); }
+		}
+		return '' === $pattern ? 0 : 128;
+	}
+	/** A server-enforced bound also covers time spent scanning before the first row. */
+	private static function bounded_select( $db, $sql, $seconds, $mode = MYSQLI_STORE_RESULT ) {
+		$ms = (int) floor( $seconds * 1000 );
+		if ( $ms < 1 ) { throw new RuntimeException( 'database_inspection_time_limit' ); }
+		if ( false !== stripos( $db->server_info, 'MariaDB' ) && $db->server_version >= 100100 ) {
+			$sql = 'SET STATEMENT max_statement_time=' . ( $ms / 1000 ) . ' FOR ' . $sql;
+		} elseif ( false === stripos( $db->server_info, 'MariaDB' ) && $db->server_version >= 50708 ) {
+			$sql = preg_replace( '/^SELECT /', 'SELECT /*+ MAX_EXECUTION_TIME(' . $ms . ') */ ', $sql, 1 );
+		} else { throw new RuntimeException( 'database_query_timeout_not_supported' ); }
+		try { return $db->query( $sql, $mode ); }
+		catch ( mysqli_sql_exception $error ) {
+			if ( in_array( $error->getCode(), array( 1317, 1969, 3024 ), true ) ) { throw new RuntimeException( 'database_inspection_time_limit', 0, $error ); }
+			throw $error;
+		}
+	}
+	private static function table_plan( $db, $name, $deadline = null ) {
+		$deadline = $deadline ?? microtime( true ) + min( self::$inspection_seconds, self::$tick_seconds );
+		$table = self::ident( $name );
+		$create = $db->query( 'SHOW CREATE TABLE ' . $table )->fetch_row()[1];
+		if ( preg_match( '/GENERATED ALWAYS|GENERATED\s+.*(?:VIRTUAL|STORED)/i', $create ) ) { throw new RuntimeException( 'generated_columns_not_supported' ); }
+		$fields = $db->query( 'SHOW FULL COLUMNS FROM ' . $table )->fetch_all( MYSQLI_ASSOC );
+		$columns = array_column( $fields, 'Field' ); $types = array_column( $fields, 'Type', 'Field' );
+		$collations = array_column( $fields, 'Collation', 'Field' );
+		$lengths = array(); $overhead = 2;
+		foreach ( $columns as $column ) {
+			$value = self::snapshot_column( $column, $types[ $column ] );
+			// mysqli returns textual values in the connection's utf8mb4 charset;
+			// their encoded size can exceed the bytes stored in a latin1 table.
+			if ( ! empty( $collations[ $column ] ) ) { $value = 'CONVERT(' . $value . ' USING utf8mb4)'; }
+			$lengths[] = 'COALESCE(OCTET_LENGTH(' . $value . '),0)*2';
+			$overhead += strlen( json_encode( $column ) ) + 8;
+		}
+		// Hex plus JSON overhead, bounded per row instead of per table. This scan also
+		// gives a conservative disk budget before entering maintenance.
+		$length = '(' . implode( '+', $lengths ) . '+' . $overhead . ')';
+		$size = self::bounded_select( $db, 'SELECT COALESCE(MAX(' . $length . '),0), COALESCE(SUM(' . $length . '),0) FROM ' . $table, $deadline - microtime( true ) )->fetch_row();
+		$packet = (int) $db->query( 'SELECT @@max_allowed_packet' )->fetch_row()[0];
+		if ( (int) $size[0] > self::ROW_BYTES || (int) $size[0] * 2 + 4096 > $packet ) { throw new RuntimeException( 'database_row_too_large' ); }
+		$keys = array();
+		foreach ( $db->query( 'SHOW INDEX FROM ' . $table ) as $index ) {
+			if ( 'PRIMARY' === $index['Key_name'] ) { $keys[(int) $index['Seq_in_index']] = $index['Column_name']; }
+		}
+		ksort( $keys );
+		// Floating-point and BIT keys use the fully ordered fallback, avoiding
+		// lossy numeric conversions in a resume predicate.
+		foreach ( $keys as $key ) { if ( preg_match( '/^(float|double|real|bit|enum|set)\b/i', $types[ $key ] ) ) { $keys = array(); break; } }
+		$numeric_columns = array_keys( array_filter( $types, static fn( $type ) => preg_match( '/^(bit|enum|set)\(/i', $type ) ) );
+		return array( 'create' => $create, 'columns' => $columns, 'types' => $types, 'collations' => $collations, 'numeric_columns' => $numeric_columns, 'keys' => array_values( $keys ), 'max_row' => (int) $size[0], 'max_packet' => $packet, 'bytes' => (int) $size[1] );
+	}
+	/** Use the same lossless SQL representation for sizing, ordering and snapshot rows. */
+	private static function snapshot_column( $column, $type ) {
+		$name = self::ident( $column );
+		// ENUM labels and SET lists can alias distinct ordinals/bitmasks.
+		if ( preg_match( '/^(bit|enum|set)\(/i', $type ) ) { return 'CAST(' . $name . ' AS UNSIGNED)'; }
+		// FLOAT's direct text output is shortened. Adding a double zero exposes
+		// the stored value with double precision, without PHP numeric conversion.
+		if ( preg_match( '/^float\b/i', $type ) ) { return '(' . $name . '+0e0)'; }
+		return $name;
+	}
+	public static function check_space( $path, $bytes ) {
+		$free = disk_free_space( $path );
+		if ( false === $free || $free < $bytes * 2 + 134217728 ) { throw new RuntimeException( 'insufficient_disk_space' ); }
+	}
+	/** Purge only the two supported plugins' regenerable page caches, never configuration. */
+	public static function page_caches( $root, $purge = false ) {
+		self::cache_adapter( $root );
+		foreach ( array( 'wp-content/cache/wp-rocket', 'wp-content/cache/tw_optimize/page_cache' ) as $relative ) {
+			$path = rtrim( $root, '/\\' );
+			foreach ( explode( '/', $relative ) as $part ) {
+				$path .= '/' . $part;
+				if ( is_link( $path ) ) { throw new RuntimeException( 'page_cache_symlink_not_supported' ); }
+			}
+			if ( ! file_exists( $path ) ) { continue; }
+			if ( ! is_dir( $path ) || ! is_writable( $path ) ) { throw new RuntimeException( 'page_cache_not_writable' ); }
+			$walk = static function ( $directory ) use ( &$walk, $purge ) {
+				foreach ( new DirectoryIterator( $directory ) as $entry ) {
+					if ( $entry->isDot() ) { continue; }
+					if ( $entry->isLink() ) { throw new RuntimeException( 'page_cache_symlink_not_supported' ); }
+					if ( ! is_writable( $entry->getPathname() ) ) { throw new RuntimeException( 'page_cache_not_writable' ); }
+					if ( $entry->isDir() ) { $walk( $entry->getPathname() ); }
+					if ( $purge && ! ( $entry->isDir() ? rmdir( $entry->getPathname() ) : unlink( $entry->getPathname() ) ) ) { throw new RuntimeException( 'page_cache_cleanup_failed' ); }
+				}
+			};
+			$walk( $path );
+		}
+	}
+	/** Only the native default layouts whose caches we can purge are supported. Never execute the drop-in here. */
+	public static function cache_adapter( $root ) {
+		$file = rtrim( $root, '/\\' ) . '/wp-content/advanced-cache.php';
+		if ( is_link( $file ) ) { throw new RuntimeException( 'page_cache_symlink_not_supported' ); }
+		if ( ! is_file( $file ) ) { return null; }
+		$source = file_get_contents( $file );
+		if ( preg_match( '/define\(\s*[\'\"]WP_ROCKET_ADVANCED_CACHE[\'\"]\s*,\s*true\s*\)/', $source ) && preg_match( '/\$rocket_cache_path\s*=\s*\'((?:\\\\.|[^\'\\\\])*)\'\s*;/', $source, $match ) ) {
+			$path = str_replace( array( "\\'", "\\\\" ), array( "'", "\\" ), $match[1] );
+			if ( rtrim( str_replace( '\\', '/', $path ), '/' ) === rtrim( str_replace( '\\', '/', $root ), '/' ) . '/wp-content/cache/wp-rocket' ) { return 'wp-rocket'; }
+		}
+		if ( preg_match( '/define\(\s*[\'\"]TENWEB_SO_ADVANCED_CACHE[\'\"]\s*,\s*true\s*\)/', $source ) && preg_match( '#define\(\s*[\'\"]TENWEB_SO_PAGE_CACHE_DIR[\'\"]\s*,\s*WP_CONTENT_DIR\s*\.\s*[\'\"]/cache/tw_optimize/page_cache/[\'\"]\s*\)#', $source ) ) {
+			// wp-config can define this before the native drop-in. Its define then
+			// leaves that override in effect, even though the source looks default.
+			if ( defined( 'TENWEB_SO_PAGE_CACHE_DIR' ) ) {
+				$path = constant( 'TENWEB_SO_PAGE_CACHE_DIR' );
+				if ( ! is_string( $path ) ) { throw new RuntimeException( 'page_cache_adapter_not_supported' ); }
+				if ( '\\' === DIRECTORY_SEPARATOR ) { $path = str_replace( '\\', '/', $path ); }
+				$expected = rtrim( str_replace( '\\', '/', $root ), '/' ) . '/wp-content/cache/tw_optimize/page_cache/';
+				// The plugin concatenates the host directly, so the final separator is required.
+				if ( ! str_ends_with( $path, '/' ) || rtrim( $path, '/' ) !== rtrim( $expected, '/' ) ) { throw new RuntimeException( 'page_cache_adapter_not_supported' ); }
+			}
+			return '10web';
+		}
+		throw new RuntimeException( 'page_cache_adapter_not_supported' );
 	}
 	/**
 	 * Whether a path (relative to the root) is something WordPress updates write: the
@@ -309,7 +570,10 @@ class EMCP_Update_Runtime {
 	 * folder the job cannot write is refused up front instead of after maintenance began.
 	 */
 	public static function preflight_files( $root ) {
-		self::files( array( 'root' => rtrim( str_replace( '\\', '/', $root ), '/' ) . '/' ), false, false );
+		$files = self::files( array( 'root' => rtrim( str_replace( '\\', '/', $root ), '/' ) . '/' ), false, false );
+		$bytes = 0;
+		foreach ( $files as $file ) { $bytes += filesize( $root . '/' . $file['path'] ); }
+		return $bytes;
 	}
 	private static function files( $s, $check_space = true, $hash = true ) {
 		$files = array(); $bytes = 0;
@@ -385,12 +649,11 @@ class EMCP_Update_Runtime {
 		if ( ! isset( $s['files'] ) || isset( $s['scan'] ) ) { self::scan_snapshot( $s ); if ( isset( $s['scan'] ) ) { return; } }
 		if ( ! isset( $s['tables'] ) ) {
 			$db = self::db( $s );
-			// Exercise restoration DDL before trusting a read-only database export.
-			$canary = self::ident( $s['db']['prefix'] . 'emcp_recovery_probe_' . str_replace( '-', '', substr( $s['job'], 0, 13 ) ) );
-			$db->query( 'CREATE TABLE ' . $canary . ' (id INT NOT NULL PRIMARY KEY, value VARBINARY(64) NULL) ENGINE=InnoDB' );
-			$db->query( 'INSERT INTO ' . $canary . " VALUES (0,'recovery')" );
-			$db->query( 'DROP TABLE ' . $canary );
-			$s['tables'] = self::tables( $db, $s['db']['prefix'] ); $db->close();
+			try {
+				self::recovery_privileges( $db, $s['db']['name'] );
+				self::recovery_probe( $s, $db );
+				$s['tables'] = self::tables( $db, $s['db']['prefix'] );
+			} finally { $db->close(); }
 			if ( ! is_dir( $dir ) && ! mkdir( $dir, 0700 ) ) { throw new RuntimeException( 'storage_error' ); }
 			$s['file_index'] = 0; $s['table_index'] = 0; $s['table_hashes'] = array();
 			$s['snapshot'] = 'snapshot-' . $s['group'];
@@ -419,29 +682,117 @@ class EMCP_Update_Runtime {
 		try {
 		while ( $s['table_index'] < count( $s['tables'] ) && $budget < self::$tick_bytes && microtime( true ) - $start < self::$tick_seconds ) {
 			if ( null === $db ) { $db = self::db( $s ); }
-			$i = $s['table_index']; $table = self::ident( $s['tables'][ $i ] );
-			$create = $db->query( 'SHOW CREATE TABLE ' . $table )->fetch_row()[1];
-			if ( preg_match( '/GENERATED ALWAYS|GENERATED\s+.*(?:VIRTUAL|STORED)/i', $create ) ) { throw new RuntimeException( 'generated_columns_not_supported' ); }
-			$max_packet = (int) $db->query( 'SELECT @@max_allowed_packet' )->fetch_row()[0];
-			$rows = array(); $bytes = 0;
-			$result = $db->query( 'SELECT * FROM ' . $table, MYSQLI_USE_RESULT );
-			foreach ( $result->fetch_fields() as $field ) { self::ident( $field->name ); }
-			while ( $row = $result->fetch_assoc() ) {
-				$row = self::encode_row( $row );
-				$row_bytes = strlen( json_encode( $row ) );
-				if ( $row_bytes * 2 + 4096 > $max_packet ) { throw new RuntimeException( 'database_row_too_large' ); }
-				$bytes += $row_bytes;
-				if ( $bytes > 20971520 || count( $rows ) >= 50000 ) { throw new RuntimeException( 'table_size_limit' ); }
-				$rows[] = $row;
-			}
-			$result->free();
-			self::write( $dir . '/table-' . $i . '.php', array( 'create' => $create, 'rows' => $rows ) );
-			$s['table_hashes'][ $i ] = hash_file( 'sha256', $dir . '/table-' . $i . '.php' );
-			$s['table_index']++; $budget += $bytes + 4096;
+			$budget += self::snapshot_table_chunk( $s, $db, $dir );
 		}
 		} finally { if ( null !== $db ) { $db->close(); } }
 		if ( $s['table_index'] < count( $s['tables'] ) ) { return; }
 		$s['snapshot_ready'] = true; $s['phase'] = 'applying'; $s['item_index'] = 0;
+	}
+	/** Persist ownership before DDL. Every statement can be replayed after a killed process. */
+	private static function recovery_probe( &$s, $db ) {
+		if ( ! isset( $s['recovery_probe'] ) ) {
+			$owner = bin2hex( random_bytes( 16 ) );
+			$s['recovery_probe'] = array( 'name' => substr( $s['db']['prefix'], 0, 30 ) . 'emcp_probe_' . substr( $owner, 0, 16 ), 'owner' => $owner, 'stage' => 'reserved' );
+			self::save( $s );
+		}
+		$p = $s['recovery_probe']; $table = self::ident( $p['name'] );
+		$exists = self::owned_probe( $s, $db );
+		if ( 'reserved' === $p['stage'] ) {
+			if ( ! $exists ) { $db->query( 'CREATE TABLE ' . $table . " (id INT NOT NULL PRIMARY KEY, value VARBINARY(64) NULL) ENGINE=InnoDB COMMENT='emcp:" . $p['owner'] . "'" ); }
+			$s['recovery_probe']['stage'] = 'created'; self::save( $s ); $p = $s['recovery_probe']; $exists = true;
+		}
+		if ( 'created' === $p['stage'] ) {
+			if ( ! $exists ) { throw new RuntimeException( 'database_probe_missing' ); }
+			$db->query( 'INSERT IGNORE INTO ' . $table . " VALUES (0,'recovery')" );
+			if ( 'recovery' !== $db->query( 'SELECT value FROM ' . $table . ' WHERE id=0' )->fetch_row()[0] ) { throw new RuntimeException( 'database_probe_failed' ); }
+			$s['recovery_probe']['stage'] = 'inserted'; self::save( $s );
+		}
+		self::remove_probe( $s, $db );
+	}
+	private static function owned_probe( $s, $db ) {
+		$p = $s['recovery_probe']; self::ident( $p['name'] );
+		if ( ! preg_match( '/^[a-f0-9]{32}$/D', $p['owner'] ) ) { throw new RuntimeException( 'database_probe_owner_mismatch' ); }
+		$row = $db->query( "SHOW TABLE STATUS WHERE Name='" . $db->real_escape_string( $p['name'] ) . "'" )->fetch_assoc();
+		if ( ! $row ) { return false; }
+		if ( 'emcp:' . $p['owner'] !== $row['Comment'] || 'InnoDB' !== $row['Engine'] ) { throw new RuntimeException( 'database_probe_owner_mismatch' ); }
+		return true;
+	}
+	private static function remove_probe( &$s, $db ) {
+		if ( self::owned_probe( $s, $db ) ) { $db->query( 'DROP TABLE ' . self::ident( $s['recovery_probe']['name'] ) ); }
+		unset( $s['recovery_probe'] ); self::save( $s );
+	}
+	/** Atomic chunks precede their cursor save. A killed tick overwrites its orphan chunk. */
+	private static function snapshot_table_chunk( &$s, $db, $dir ) {
+		$i = $s['table_index']; $table = self::ident( $s['tables'][ $i ] );
+		if ( ! isset( $s['table_snapshot'] ) ) {
+			$plan = self::table_plan( $db, $s['tables'][ $i ] );
+			self::recovery_privileges( $db, $s['db']['name'], $plan['create'] );
+			self::check_space( $dir, $plan['bytes'] );
+			$s['table_snapshot'] = $plan + array( 'rows' => 0, 'chunks' => array(), 'last' => null );
+		}
+		$part = &$s['table_snapshot']; $where = ''; $offset = '';
+		if ( $part['keys'] ) {
+			$order = implode( ',', array_map( array( self::class, 'ident' ), $part['keys'] ) );
+			if ( null !== $part['last'] ) {
+				$values = array();
+				foreach ( $part['keys'] as $k => $key ) {
+					$value = "X'" . $part['last'][ $k ] . "'"; $type = $part['types'][ $key ];
+					if ( preg_match( '/^(tinyint|smallint|mediumint|int|bigint)\b/i', $type ) ) { $value = 'CAST(CONVERT(' . $value . ' USING utf8mb4) AS DECIMAL(65,0))'; }
+					elseif ( preg_match( '/^(decimal\([0-9]+,[0-9]+\))/i', $type, $match ) ) { $value = 'CAST(CONVERT(' . $value . ' USING utf8mb4) AS ' . $match[1] . ')'; }
+					elseif ( ! preg_match( '/binary|blob/i', $type ) ) {
+						$value = 'CONVERT(' . $value . ' USING utf8mb4)';
+						$collation = $part['collations'][ $key ] ?? null;
+						if ( $collation ) {
+							self::ident( $collation ); $charset = explode( '_', $collation )[0];
+							$value = 'CONVERT(' . $value . ' USING ' . $charset . ') COLLATE ' . $collation;
+						}
+					}
+					$values[] = $value;
+				}
+				$where = ' WHERE (' . $order . ') > (' . implode( ',', $values ) . ')';
+			}
+		} else {
+			// Without a unique key, sort every value byte-for-byte. Tied rows are
+			// identical, so LIMIT/OFFSET preserves duplicate multiplicity on retry.
+			$order = implode( ',', array_map( static function ( $column ) use ( $part ) {
+				$value = self::snapshot_column( $column, $part['types'][ $column ] );
+				return 'BINARY ' . $value . ',SHA2(' . $value . ',256)';
+			}, $part['columns'] ) );
+			$offset = ' OFFSET ' . (int) $part['rows'];
+		}
+		$limit = max( 1, min( 1000, self::$tick_rows, intdiv( self::CHUNK_BYTES, max( 1, $part['max_row'] ) ) ) );
+		// SELECT * omits invisible columns, including MySQL's generated invisible PK.
+		$columns = implode( ',', array_map( static function ( $column ) use ( $part ) {
+			$name = self::ident( $column );
+			$value = self::snapshot_column( $column, $part['types'][ $column ] );
+			return $value === $name ? $name : $value . ' AS ' . $name;
+		}, $part['columns'] ) );
+		$result = $db->query( 'SELECT ' . $columns . ' FROM ' . $table . $where . ' ORDER BY ' . $order . ' LIMIT ' . $limit . $offset, MYSQLI_USE_RESULT );
+		$rows = array(); $bytes = 0; $start = microtime( true ); $last = null;
+		try {
+			while ( $row = $result->fetch_assoc() ) {
+				$row = self::encode_row( $row ); $size = strlen( json_encode( $row, JSON_THROW_ON_ERROR ) );
+				if ( $size > self::ROW_BYTES || $size * 2 + 4096 > $part['max_packet'] ) { throw new RuntimeException( 'database_row_too_large' ); }
+				$rows[] = $row; $bytes += $size;
+				$last = array_map( static fn( $key ) => $row[ $key ], $part['keys'] );
+				if ( $bytes >= min( self::CHUNK_BYTES, self::$tick_bytes ) || microtime( true ) - $start >= self::$tick_seconds ) { break; }
+			}
+		} finally { $result->free(); }
+		if ( $rows ) {
+			$path = $dir . '/table-' . $i . '-chunk-' . count( $part['chunks'] ) . '.php';
+			self::check_space( $dir, $bytes );
+			self::write( $path, $rows );
+			$part['chunks'][] = array( 'rows' => count( $rows ), 'hash' => hash_file( 'sha256', $path ) );
+			$part['rows'] += count( $rows ); $part['last'] = $last;
+			self::save( $s );
+		} else {
+			$path = $dir . '/table-' . $i . '.php';
+			self::write( $path, array( 'format' => 2, 'create' => $part['create'], 'rows' => $part['rows'], 'chunks' => $part['chunks'], 'numeric_columns' => $part['numeric_columns'] ?? array() ) );
+			$s['table_hashes'][ $i ] = hash_file( 'sha256', $path );
+			$s['table_index']++; unset( $s['table_snapshot'] );
+			self::save( $s );
+		}
+		return $bytes + 4096;
 	}
 
 	private static function apply( &$s ) {
@@ -531,35 +882,57 @@ class EMCP_Update_Runtime {
 		}
 		$db = self::db( $s ); $db->query( 'SET FOREIGN_KEY_CHECKS=0' );
 		try {
+			if ( ! self::reset_restore_schema( $s, $db, $dir ) ) { return; }
 			if ( $s['restore_db'] < count( $s['tables'] ) ) {
-				$i = $s['restore_db']; $path = $dir . '/table-' . $i . '.php';
-				if ( ! hash_equals( $s['table_hashes'][ $i ], hash_file( 'sha256', $path ) ) ) { throw new RuntimeException( 'snapshot_corrupt' ); }
-				$backup = self::read( $path ); $table = self::ident( $s['tables'][ $i ] );
+				$i = $s['restore_db']; $backup = self::table_backup( $s, $dir, $i ); $table = self::ident( $s['tables'][ $i ] );
+				$chunked = 2 === ( $backup['format'] ?? 1 );
 				if ( ( $s['restore_created'] ?? -1 ) !== $i ) {
+					// Baseline triggers are refused at snapshot time. Any trigger here was
+					// introduced after that baseline and DROP TABLE must roll it back too.
+					self::recovery_privileges( $db, $s['db']['name'], $backup['create'] );
 					$db->query( 'DROP TABLE IF EXISTS ' . $table ); $db->query( $backup['create'] );
 					$s['restore_created'] = $i; self::save( $s );
 				}
 				// Each INSERT commits atomically (InnoDB, autocommit) and only this job writes the
 				// recreated table, so its row count is exactly how far an interrupted restore got.
 				$done = (int) $db->query( 'SELECT COUNT(*) FROM ' . $table )->fetch_row()[0];
-				$total = count( $backup['rows'] );
+				$total = $chunked ? $backup['rows'] : count( $backup['rows'] );
 				if ( $done > $total ) { throw new RuntimeException( 'restore_count_mismatch' ); }
+				$base = 0; $data = $chunked ? array() : $backup['rows'];
+				if ( $chunked && $done < $total ) {
+					foreach ( $backup['chunks'] as $chunk => $info ) {
+						if ( $done < $base + $info['rows'] ) {
+							$path = $dir . '/table-' . $i . '-chunk-' . $chunk . '.php';
+							$data = self::read_table_chunk( $path, $info ); break;
+						}
+						$base += $info['rows'];
+					}
+				}
 				$limit = min( 1048576, intdiv( (int) $db->query( 'SELECT @@max_allowed_packet' )->fetch_row()[0], 2 ) );
+				$types = array_column( $db->query( 'SHOW FULL COLUMNS FROM ' . $table )->fetch_all( MYSQLI_ASSOC ), 'Type', 'Field' );
 				$batch = array(); $batch_bytes = 0; $columns = null; $rows = 0; $bytes = 0;
 				$flush = static function () use ( $db, $table, &$batch, &$batch_bytes, &$columns ) {
 					if ( $batch ) { $db->query( 'INSERT INTO ' . $table . ' (' . $columns . ') VALUES ' . implode( ',', $batch ) ); }
 					$batch = array(); $batch_bytes = 0;
 				};
-				for ( $r = $done; $r < $total && $rows < self::$tick_rows && $bytes < self::$tick_bytes; $r++ ) {
-					$row = $backup['rows'][ $r ];
+				$start = microtime( true );
+				for ( $r = $done - $base; $r < count( $data ) && $rows < self::$tick_rows && $bytes < self::$tick_bytes && microtime( true ) - $start < self::$tick_seconds; $r++ ) {
+					$row = $data[ $r ];
 					$cols = implode( ',', array_map( array( self::class, 'ident' ), array_keys( $row ) ) );
-					$values = '(' . implode( ',', array_map( static fn( $v ) => null === $v ? 'NULL' : "'" . $db->real_escape_string( $v ) . "'", self::decode_row( $row ) ) ) . ')';
+					$values = array();
+					foreach ( self::restore_row( $row, $backup['numeric_columns'] ?? array() ) as $column => $value ) {
+						if ( null === $value ) { $values[] = 'NULL'; }
+						elseif ( in_array( $column, $backup['numeric_columns'] ?? array(), true ) || preg_match( '/^bit\(/i', $types[ $column ] ?? '' ) ) {
+							$values[] = self::unsigned_value( $value );
+						} else { $values[] = "'" . $db->real_escape_string( $value ) . "'"; }
+					}
+					$values = '(' . implode( ',', $values ) . ')';
 					if ( $batch && ( $cols !== $columns || $batch_bytes + strlen( $values ) > $limit ) ) { $flush(); }
 					$columns = $cols; $batch[] = $values; $batch_bytes += strlen( $values ) + 1;
 					$rows++; $bytes += strlen( $values );
 				}
 				$flush();
-				if ( $r >= $total ) { $s['restore_db']++; unset( $s['restore_created'] ); }
+				if ( $base + $r >= $total ) { $s['restore_db']++; unset( $s['restore_created'], $s['restore_validation'], $s['restore_validated'] ); }
 				return;
 			}
 			foreach ( $db->query( 'SHOW TABLE STATUS' ) as $row ) {
@@ -572,6 +945,104 @@ class EMCP_Update_Runtime {
 		if ( function_exists( 'opcache_reset' ) ) { opcache_reset(); }
 		if ( is_file( $s['root'] . '.maintenance' ) ) { unlink( $s['root'] . '.maintenance' ); }
 		$s['phase'] = 'verify_restore';
+	}
+	private static function table_backup( $s, $dir, $i ) {
+		$path = $dir . '/table-' . $i . '.php';
+		if ( ! is_file( $path ) || ! hash_equals( $s['table_hashes'][ $i ], hash_file( 'sha256', $path ) ) ) { throw new RuntimeException( 'snapshot_corrupt' ); }
+		$backup = self::read( $path );
+		if ( ! is_array( $backup ) || ! isset( $backup['create'], $backup['rows'] ) || ! is_string( $backup['create'] ) || ( isset( $backup['format'] ) && 2 !== $backup['format'] ) ) { throw new RuntimeException( 'snapshot_corrupt' ); }
+		if ( isset( $backup['numeric_columns'] ) && ( ! is_array( $backup['numeric_columns'] ) || count( array_filter( $backup['numeric_columns'], 'is_string' ) ) !== count( $backup['numeric_columns'] ) ) ) { throw new RuntimeException( 'snapshot_corrupt' ); }
+		return $backup;
+	}
+	private static function unsigned_value( $value ) {
+		if ( ! is_string( $value ) || ! preg_match( '/^(0|[1-9][0-9]{0,19})$/D', $value ) || ( 20 === strlen( $value ) && strcmp( $value, '18446744073709551615' ) > 0 ) ) { throw new RuntimeException( 'snapshot_corrupt' ); }
+		return $value;
+	}
+	private static function restore_row( $row, $numeric_columns ) {
+		$decoded = self::decode_row( $row );
+		foreach ( $numeric_columns as $column ) {
+			if ( ! array_key_exists( $column, $decoded ) ) { throw new RuntimeException( 'snapshot_corrupt' ); }
+			if ( null !== $decoded[ $column ] ) { self::unsigned_value( $decoded[ $column ] ); }
+		}
+		return $decoded;
+	}
+	/** Check all snapshots before any database DROP; then clear the scoped FK namespace. */
+	private static function reset_restore_schema( &$s, $db, $dir ) {
+		if ( ! empty( $s['restore_reset']['done'] ) ) { return true; }
+		$s['restore_reset'] = $s['restore_reset'] ?? array( 'checked' => 0, 'pending' => null, 'cursor' => 0, 'done' => false );
+		$reset = &$s['restore_reset'];
+		if ( $reset['checked'] < count( $s['tables'] ) ) {
+			$i = $reset['checked']; $backup = self::table_backup( $s, $dir, $i );
+			if ( 2 === ( $backup['format'] ?? 1 ) ) {
+				if ( ! self::validate_table_chunks( $s, $backup, $dir, $i ) ) { return false; }
+			} else {
+				if ( ! is_array( $backup['rows'] ) ) { throw new RuntimeException( 'snapshot_corrupt' ); }
+				foreach ( $backup['rows'] as $row ) { self::restore_row( $row, $backup['numeric_columns'] ?? array() ); }
+			}
+			self::recovery_privileges( $db, $s['db']['name'], $backup['create'] );
+			self::restore_constraint_scope( $s, $db, $backup['create'] );
+			$reset['checked']++; unset( $s['restore_validation'], $s['restore_validated'] ); self::save( $s );
+			return false;
+		}
+		self::recovery_privileges( $db, $s['db']['name'] );
+		if ( null === $reset['pending'] ) {
+			$reset['pending'] = array();
+			foreach ( $db->query( 'SHOW TABLE STATUS' ) as $row ) {
+				if ( ! str_starts_with( $row['Name'], $s['db']['prefix'] ) ) { continue; }
+				self::ident( $row['Name'] );
+				$reset['pending'][] = array( 'name' => $row['Name'], 'view' => null === $row['Engine'] );
+			}
+			// This durable list is never rediscovered after any restored INSERTs.
+			self::save( $s );
+		}
+		$start = microtime( true ); $count = 0;
+		while ( $reset['cursor'] < count( $reset['pending'] ) && $count < self::$tick_rows && microtime( true ) - $start < self::$tick_seconds ) {
+			$item = $reset['pending'][ $reset['cursor'] ];
+			$db->query( ( $item['view'] ? 'DROP VIEW IF EXISTS ' : 'DROP TABLE IF EXISTS ' ) . self::ident( $item['name'] ) );
+			$reset['cursor']++; $count++; self::save( $s );
+		}
+		if ( $reset['cursor'] < count( $reset['pending'] ) ) { return false; }
+		$reset['done'] = true; self::save( $s );
+		return true;
+	}
+	/** An out-of-scope owner cannot be removed safely, even if it collides with baseline DDL. */
+	private static function restore_constraint_scope( $s, $db, $create ) {
+		preg_match_all( '/^\s*CONSTRAINT `((?:``|[^`])+)` FOREIGN KEY /m', $create, $matches );
+		if ( ! $matches[1] ) { return; }
+		$schema = $s['db']['name'];
+		$statement = $db->prepare( 'SELECT TABLE_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=? AND CONSTRAINT_NAME=?' );
+		try {
+			foreach ( $matches[1] as $name ) {
+				$name = str_replace( '``', '`', $name ); $statement->bind_param( 'ss', $schema, $name );
+				$statement->execute(); $statement->bind_result( $owner );
+				while ( $statement->fetch() ) {
+					if ( ! str_starts_with( $owner, $s['db']['prefix'] ) ) { throw new RuntimeException( 'database_recovery_constraint_outside_scope' ); }
+				}
+				$statement->free_result();
+			}
+		} finally { $statement->close(); }
+	}
+	private static function read_table_chunk( $path, $info ) {
+		if ( ! is_file( $path ) || ! hash_equals( $info['hash'], hash_file( 'sha256', $path ) ) ) { throw new RuntimeException( 'snapshot_corrupt' ); }
+		$rows = self::read( $path );
+		if ( ! is_array( $rows ) || count( $rows ) !== $info['rows'] ) { throw new RuntimeException( 'snapshot_corrupt' ); }
+		return $rows;
+	}
+	/** Verify every chunk before dropping the live table, in bounded, restartable ticks. */
+	private static function validate_table_chunks( &$s, $backup, $dir, $i ) {
+		if ( ! is_int( $backup['rows'] ) || $backup['rows'] < 0 || ! is_array( $backup['chunks'] ) || array_sum( array_column( $backup['chunks'], 'rows' ) ) !== $backup['rows'] ) { throw new RuntimeException( 'snapshot_corrupt' ); }
+		if ( ( $s['restore_validated'] ?? -1 ) === $i ) { return true; }
+		$cursor = $s['restore_validation'] ?? 0; $bytes = 0; $start = microtime( true );
+		for ( ; $cursor < count( $backup['chunks'] ) && $bytes < self::$tick_bytes && microtime( true ) - $start < self::$tick_seconds; $cursor++ ) {
+			$path = $dir . '/table-' . $i . '-chunk-' . $cursor . '.php';
+			$rows = self::read_table_chunk( $path, $backup['chunks'][ $cursor ] );
+			foreach ( $rows as $row ) { self::restore_row( $row, $backup['numeric_columns'] ?? array() ); }
+			$bytes += filesize( $path );
+		}
+		$s['restore_validation'] = $cursor;
+		if ( $cursor === count( $backup['chunks'] ) ) { $s['restore_validated'] = $i; }
+		self::save( $s );
+		return ( $s['restore_validated'] ?? -1 ) === $i;
 	}
 	/** Deletes every in-scope file the snapshot does not know, re-enumerated beneath the fixed root (symlinks fail closed). */
 	private static function prune( $s ) {
