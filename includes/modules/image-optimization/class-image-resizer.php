@@ -95,11 +95,12 @@ class EMCP_Tools_Image_Resizer {
 		if ( is_wp_error( $editor ) ) {
 			return $editor;
 		}
-		$editor->set_quality( EMCP_Tools_Image_Optimizer::clamp_quality( (int) get_option( self::quality_option(), 60 ) ) );
 		$resized = $editor->resize( $w, $h, $crop );
 		if ( is_wp_error( $resized ) ) {
 			return $resized;
 		}
+		// After resize(): WP_Image_Editor resets the quality to its default there.
+		$editor->set_quality( EMCP_Tools_Image_Optimizer::clamp_quality( (int) get_option( self::quality_option(), 60 ) ) );
 		$saved = $editor->save( $file );
 		if ( is_wp_error( $saved ) ) {
 			return $saved;

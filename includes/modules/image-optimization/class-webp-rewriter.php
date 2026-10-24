@@ -4,9 +4,14 @@
  *
  * Filters `wp_get_attachment_url` / `wp_get_attachment_image_src` /
  * `wp_calculate_image_srcset`. Rewrites a jpg/png URL to its `.webp` sibling
- * only when the sibling file exists AND the request can take WebP — the
- * frontend `Accept: image/webp` header, or any REST/CLI/cron context (so the
- * MCP media tools always resolve to WebP). Old browsers keep the original.
+ * when the sibling file exists, on the frontend while "Serve WebP on the site"
+ * is on and always in REST/CLI/cron (so the MCP media tools resolve to WebP).
+ *
+ * The decision never depends on the visitor's request. Elementor caches the
+ * rendered widget HTML and writes image URLs into its generated CSS, so the
+ * first request to render a page decided what every later visitor got: a
+ * crawler without `image/webp` in its Accept header froze JPEG for everyone,
+ * a WebP browser froze WebP for everyone. Every current browser shows WebP.
  *
  * @package EMCP_Tools
  * @since   3.1.0
@@ -29,7 +34,7 @@ class EMCP_Tools_Webp_Rewriter {
 	/** @var string Uploads base URL. */
 	private $baseurl;
 
-	/** @var bool Whether to rewrite frontend (Accept-header) requests. */
+	/** @var bool Whether to rewrite frontend requests. */
 	private $serve_frontend;
 
 	/**
@@ -50,22 +55,15 @@ class EMCP_Tools_Webp_Rewriter {
 	}
 
 	/**
-	 * Whether the current request may be served WebP.
+	 * Whether URLs are rewritten to WebP in this context. Deliberately takes
+	 * nothing from the request (see the file header).
 	 *
-	 * REST/CLI/cron always qualifies (so the MCP media tools resolve to WebP).
-	 * Frontend requests additionally require the "serve on frontend" toggle and
-	 * an `Accept: image/webp` header.
-	 *
-	 * @param string $accept         The request Accept header.
-	 * @param bool   $is_rest        Whether we're in a REST/CLI/cron context.
-	 * @param bool   $serve_frontend Whether frontend rewriting is enabled.
+	 * @param bool $is_rest        Whether we're in a REST/CLI/cron context.
+	 * @param bool $serve_frontend Whether frontend rewriting is enabled.
 	 * @return bool
 	 */
-	public static function should_rewrite( string $accept, bool $is_rest, bool $serve_frontend = true ): bool {
-		if ( $is_rest ) {
-			return true;
-		}
-		return $serve_frontend && false !== strpos( $accept, 'image/webp' );
+	public static function should_rewrite( bool $is_rest, bool $serve_frontend = true ): bool {
+		return $is_rest || $serve_frontend;
 	}
 
 	/**
@@ -91,8 +89,7 @@ class EMCP_Tools_Webp_Rewriter {
 
 	/** @return bool Whether the current request should get WebP. */
 	private function allowed(): bool {
-		$accept = isset( $_SERVER['HTTP_ACCEPT'] ) ? (string) $_SERVER['HTTP_ACCEPT'] : '';
-		return self::should_rewrite( $accept, $this->is_rest_context(), $this->serve_frontend );
+		return self::should_rewrite( $this->is_rest_context(), $this->serve_frontend );
 	}
 
 	/**

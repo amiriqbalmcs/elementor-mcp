@@ -60,7 +60,7 @@ $emcp_io_toggle = static function ( $name, $on, $title, $desc, $child = false ) 
 		$p . 'webp_serve',
 		$settings['webp_serve'],
 		__( 'Serve WebP on the frontend', 'emcp-tools' ),
-		__( 'Send WebP to browsers that support it. MCP & AI Chat always use WebP regardless of this.', 'emcp-tools' ),
+		__( 'Send WebP to every visitor where a WebP copy exists, so cached pages look the same for everyone. MCP & AI Chat always use WebP regardless of this.', 'emcp-tools' ),
 		true
 	);
 	?>
@@ -83,6 +83,25 @@ $emcp_io_toggle = static function ( $name, $on, $title, $desc, $child = false ) 
 			value="<?php echo esc_attr( (string) $settings['quality'] ); ?>"
 		/>
 		<div class="emcp-io-range-scale"><span><?php esc_html_e( 'Smaller files', 'emcp-tools' ); ?></span><span><?php esc_html_e( 'Higher quality', 'emcp-tools' ); ?></span></div>
+	</div>
+
+	<div class="emcp-io-field">
+		<div class="emcp-io-field-head">
+			<label for="<?php echo esc_attr( $p . 'webp_quality' ); ?>"><?php esc_html_e( 'WebP quality', 'emcp-tools' ); ?></label>
+		</div>
+		<div class="emcp-io-inline">
+			<input
+				type="number"
+				id="<?php echo esc_attr( $p . 'webp_quality' ); ?>"
+				name="<?php echo esc_attr( $p . 'webp_quality' ); ?>"
+				class="emcp-io-number"
+				min="0"
+				max="100"
+				step="1"
+				value="<?php echo esc_attr( (string) $settings['webp_quality'] ); ?>"
+			/>
+		</div>
+		<span class="emcp-io-hint"><?php esc_html_e( '0 = automatic: 15 below Quality, where WebP looks the same as the JPEG and is smaller.', 'emcp-tools' ); ?></span>
 	</div>
 
 	<div class="emcp-io-field">
