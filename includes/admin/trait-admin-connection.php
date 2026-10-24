@@ -471,25 +471,25 @@ trait EMCP_Tools_Admin_Connection_Trait {
 			'template' => "{\n    \"mcpServers\": {\n        \"%NAME%\": {\n            \"url\": \"%ENDPOINT%\"\n        }\n    }\n}",
 			'deeplink' => 'cursor',
 		);
-		// The ChatGPT App signs in through its own MCP UI (Settings → Plugins → MCPs →
-		// Add → custom MCP → Streamable HTTP → Save → Authenticate). Codex is
-		// part of the desktop app since July 2026 and shares its MCP settings.
+		// The ChatGPT App adds EMCP as a custom MCP plugin (Plugins → Add → Add
+		// custom MCP server → OAuth → Create as a plugin → Continue → Approve →
+		// Open ChatGPT). The OAuth round trip runs through chatgpt.com.
 		$oauth_codex = array(
 			'type'  => 'steps',
 			'steps' => array(
 				array(
-					'title' => __( 'a. Open the MCP settings', 'emcp-tools' ),
-					'desc'  => __( 'In the ChatGPT desktop app, open Settings → Plugins, switch to the MCPs tab, click “Add” and choose to connect a custom MCP.', 'emcp-tools' ),
+					'title' => __( 'a. Add a custom MCP server', 'emcp-tools' ),
+					'desc'  => __( 'In the ChatGPT desktop app, click Plugins in the sidebar, then “Add” → “Add custom MCP server”.', 'emcp-tools' ),
 				),
 				array(
-					'title' => __( 'b. Choose Streamable HTTP', 'emcp-tools' ),
-					'desc'  => __( 'Choose “Streamable HTTP”, then enter a name and this server URL:', 'emcp-tools' ),
+					'title' => __( 'b. Fill in the form', 'emcp-tools' ),
+					'desc'  => __( 'Enter this name and server URL, keep Authentication on “OAuth”, tick “I understand and want to continue” and click “Create as a plugin”:', 'emcp-tools' ),
 				),
 				array( 'title' => __( 'Name', 'emcp-tools' ), 'copy' => '%NAME%' ),
 				array( 'title' => __( 'URL', 'emcp-tools' ), 'copy' => '%ENDPOINT%' ),
 				array(
-					'title' => __( 'c. Save, then Authenticate', 'emcp-tools' ),
-					'desc'  => __( 'Click Save. An “Authenticate” button appears on the server row, click it, then “Approve” on the consent screen that opens. Your site is now connected and you can start chatting.', 'emcp-tools' ),
+					'title' => __( 'c. Continue, then Approve', 'emcp-tools' ),
+					'desc'  => __( 'Click “Continue”, then “Approve” on the consent screen that opens on this site, and “Open ChatGPT” when your browser asks. Your site is now connected and you can start chatting.', 'emcp-tools' ),
 				),
 			),
 		);
